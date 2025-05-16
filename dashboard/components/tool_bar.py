@@ -8,7 +8,7 @@ class ToolBar(QToolBar):
         self.initUI()
 
     def initUI(self):
-        self.setFixedHeight(75)
+        self.setFixedHeight(80)
         self.update_toolbar()
 
     def update_toolbar(self):
@@ -65,7 +65,7 @@ class ToolBar(QToolBar):
                 """)
 
         feature_actions = [
-            ("Create Tags", "🏷️", "#81c784", "Access Create Tags Feature"),
+            # ("Create Tags", "🏷️", "#81c784", "Access Create Tags Feature"),
             ("Time View", "⏱️", "#ffb300", "Access Time View Feature"),
             ("Tabular View", "📋", "#64b5f6", "Access Tabular View Feature"),
             ("Time Report", "📄", "#4db6ac", "Access Time Report Feature"),

@@ -13,7 +13,7 @@ from dashboard.components.tree_view import TreeView
 from dashboard.components.console import Console
 from dashboard.components.mqtt_status import MQTTStatus
 from mqtthandler import MQTTHandler
-from features.create_tags import CreateTagsFeature
+# from features.create_tags import CreateTagsFeature
 from features.tabular_view import TabularViewFeature
 from features.time_view import TimeViewFeature
 from features.fft_view import FFTViewFeature
@@ -25,14 +25,20 @@ from features.bode_plot import BodePlotFeature
 from features.history_plot import HistoryPlotFeature
 from features.time_report import TimeReportFeature
 from features.report import ReportFeature
+from select_project import SelectProjectWidget
+from create_project import CreateProjectWidget
+from project_structure import ProjectStructureWidget
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DashboardWindow(QWidget):
-    def __init__(self, db, email, project_name, project_selection_window):
+    def __init__(self, db, email, auth_window=None):
         super().__init__()
         self.db = db
         self.email = email
-        self.current_project = project_name
-        self.project_selection_window = project_selection_window
+        self.auth_window = auth_window
+        self.current_project = None
+        self.open_dashboards = {}  # Track open dashboard windows by project name
         self.current_feature = None
         self.mqtt_handler = None
         self.feature_instances = {}
@@ -41,13 +47,15 @@ class DashboardWindow(QWidget):
         self.timer.setSingleShot(True)
         self.is_saving = False
         self.mqtt_connected = False
-        self.current_layout = (2, 2)
+        self.select_project_widget = None
+        self.create_project_widget = None
+        self.project_structure_widget = None
 
         self.initUI()
         QTimer.singleShot(0, self.deferred_initialization)
 
     def initUI(self):
-        self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
+        self.setWindowTitle('Sarayu Desktop Application')
         self.setWindowState(Qt.WindowMaximized)
 
         app = QApplication.instance()
@@ -116,14 +124,22 @@ class DashboardWindow(QWidget):
         self.tool_bar = ToolBar(self)
         main_layout.addWidget(self.tool_bar)
 
-        main_splitter = QSplitter(Qt.Horizontal)
-        main_splitter.setContentsMargins(0, 0, 0, 0)
-        main_splitter.setHandleWidth(1)
-        main_splitter.setStyleSheet("QSplitter::handle { background-color: #2c3e50; }")
-        main_layout.addWidget(main_splitter)
+        central_widget = QWidget()
+        central_layout = QVBoxLayout()
+        central_layout.setContentsMargins(0, 0, 0, 0)
+        central_layout.setSpacing(0)
+        central_widget.setLayout(central_layout)
+        main_layout.addWidget(central_widget, 1)
+
+        self.main_splitter = QSplitter(Qt.Horizontal)
+        self.main_splitter.setContentsMargins(0, 0, 0, 0)
+        self.main_splitter.setHandleWidth(1)
+        self.main_splitter.setStyleSheet("QSplitter::handle { background-color: #2c3e50; }")
+        central_layout.addWidget(self.main_splitter)
 
         self.tree_view = TreeView(self)
-        main_splitter.addWidget(self.tree_view)
+        self.tree_view.setVisible(False)  # Hide initially
+        self.main_splitter.addWidget(self.tree_view)
 
         right_container = QWidget()
         right_container.setStyleSheet("background-color: #263238;")
@@ -133,27 +149,88 @@ class DashboardWindow(QWidget):
         right_container.setLayout(right_layout)
 
         self.sub_tool_bar = SubToolBar(self)
+        self.sub_tool_bar.setVisible(False)  # Hide initially
         right_layout.addWidget(self.sub_tool_bar)
 
         self.main_section = MainSection(self)
         right_layout.addWidget(self.main_section, 1)
 
-        main_splitter.addWidget(right_container)
-        main_splitter.setSizes([250, 950])
+        self.main_splitter.addWidget(right_container)
+        # Set splitter sizes: 15% for TreeView, 85% for right_container
+        window_width = self.width() if self.width() > 0 else 1200  # Default width if not yet sized
+        tree_view_width = int(window_width * 0.15)
+        right_container_width = int(window_width * 0.85)
+        self.main_splitter.setSizes([tree_view_width, right_container_width])
 
         self.console = Console(self)
         self.mqtt_status = MQTTStatus(self)
         self.console_layout = QVBoxLayout()
-        self.console_layout.setContentsMargins(0, 0, 0, 0)
-        self.console_layout.setSpacing(0)
+        self.console_layout.setContentsMargins(5, 5, 5, 5)
+        self.console_layout.setSpacing(5)
         console_container = QWidget()
+        console_container.setStyleSheet("background-color: #1e2937; border-top: 1px solid #2c3e50;")
+        console_container.setFixedHeight(150)  # Fixed height for console area
         console_container.setLayout(self.console_layout)
         self.console_layout.addWidget(self.console.button_container)
         self.console_layout.addWidget(self.console.console_message_area)
         self.console_layout.addWidget(self.mqtt_status)
-        main_layout.addWidget(console_container, 0)
+        main_layout.addWidget(console_container)
 
     def deferred_initialization(self):
+        projects = self.db.load_projects()
+        if projects and self.current_project:
+            self.load_project(self.current_project)
+        else:
+            self.display_select_project()
+
+    def display_select_project(self):
+        self.clear_content_layout()
+        self.tree_view.setVisible(False)
+        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.current_project = None
+        self.setWindowTitle('Sarayu Desktop Application')
+        self.select_project_widget = SelectProjectWidget(self)
+        self.main_section.set_widget(self.select_project_widget)
+        logging.debug("Displayed SelectProjectWidget in MainSection")
+
+    def display_create_project(self):
+        self.clear_content_layout()
+        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.create_project_widget = CreateProjectWidget(self)
+        self.main_section.set_widget(self.create_project_widget)
+        logging.debug("Displayed CreateProjectWidget in MainSection")
+
+    def display_project_structure(self):
+        self.clear_content_layout()
+        self.tree_view.setVisible(False)  # Hide TreeView
+        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.project_structure_widget = ProjectStructureWidget(self)
+        # Connect the project_selected signal to load_project
+        self.project_structure_widget.project_selected.connect(self.load_project)
+        self.main_section.set_widget(self.project_structure_widget)
+        # Adjust splitter to give full width to right_container
+        self.main_splitter.setSizes([0, 1200])  # 0 for TreeView, full width for MainSection
+        logging.debug("Displayed ProjectStructureWidget in MainSection")
+
+    def load_project(self, project_name):
+        self.current_project = project_name
+        self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
+        self.tree_view.setVisible(True)
+        self.sub_tool_bar.setVisible(True)  # Show SubToolBar
+        # Reset splitter sizes to 15%/85%
+        window_width = self.width() if self.width() > 0 else 1200
+        tree_view_width = int(window_width * 0.15)
+        right_container_width = int(window_width * 0.85)
+        self.main_splitter.setSizes([tree_view_width, right_container_width])
+        logging.debug(f"TreeView visibility: {self.tree_view.isVisible()}")
+        logging.debug(f"SubToolBar visibility: {self.sub_tool_bar.isVisible()}")
+        logging.debug(f"Loading project: {project_name}")
+        # Explicitly clear ProjectStructureWidget
+        self.clear_content_layout()
+        if self.project_structure_widget:
+            self.project_structure_widget.setParent(None)
+            self.project_structure_widget = None
+            logging.debug("ProjectStructureWidget removed from MainSection")
         self.load_project_features()
         self.setup_mqtt()
         self.display_feature_content("Create Tags", self.current_project)
@@ -278,6 +355,7 @@ class DashboardWindow(QWidget):
                     self.tree_view.tree.setCurrentItem(item)
                     self.tree_view.tree.scrollToItem(item)
                     break
+            logging.debug(f"Loaded project features for: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to load project features: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to load project features: {str(e)}")
@@ -290,44 +368,18 @@ class DashboardWindow(QWidget):
             if not projects:
                 QMessageBox.warning(self, "Error", "No projects available to open!")
                 return
-            project_name, ok = QInputDialog.getItem(self, "Open Project", "Select project:", projects, 0, False)
-            if ok and project_name:
-                if project_name in self.project_selection_window.open_dashboards:
-                    self.project_selection_window.open_dashboards[project_name].raise_()
-                    self.project_selection_window.open_dashboards[project_name].activateWindow()
-                    return
-                dashboard = DashboardWindow(self.db, self.email, project_name, self.project_selection_window)
-                dashboard.show()
-                self.project_selection_window.open_dashboards[project_name] = dashboard
-                self.project_selection_window.load_projects()
-                QMessageBox.information(self, "Success", f"Opened project: {project_name}")
-                self.file_bar.update_file_bar()
+            self.display_project_structure()
         except Exception as e:
             logging.error(f"Error opening project: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error opening project: {str(e)}")
 
     def create_project(self):
-        project_name, ok = QInputDialog.getText(self, "Create Project", "Enter project name:")
-        if ok and project_name:
-            try:
-                if not self.db.is_connected():
-                    self.db.reconnect()
-                success, message = self.db.create_project(project_name)
-                if success:
-                    dashboard = DashboardWindow(self.db, self.email, project_name, self.project_selection_window)
-                    dashboard.show()
-                    self.project_selection_window.open_dashboards[project_name] = dashboard
-                    self.project_selection_window.load_projects()
-                    self.sub_tool_bar.update_subtoolbar()
-                    QMessageBox.information(self, "Success", message)
-                    self.file_bar.update_file_bar()
-                else:
-                    QMessageBox.warning(self, "Error", message)
-            except Exception as e:
-                logging.error(f"Error creating project: {str(e)}")
-                QMessageBox.warning(self, "Error", f"Error creating project: {str(e)}")
+        self.display_create_project()
 
     def edit_project_dialog(self):
+        if not self.current_project:
+            QMessageBox.warning(self, "Error", "No project selected to edit!")
+            return
         old_project_name = self.current_project
         new_project_name, ok = QInputDialog.getText(self, "Edit Project", "Enter new project name:", text=old_project_name)
         if not ok or not new_project_name or new_project_name == old_project_name:
@@ -347,9 +399,8 @@ class DashboardWindow(QWidget):
                     self.display_feature_content(self.current_feature, self.current_project)
                 else:
                     self.display_feature_content("Create Tags", self.current_project)
-                if old_project_name in self.project_selection_window.open_dashboards:
-                    self.project_selection_window.open_dashboards[new_project_name] = self.project_selection_window.open_dashboards.pop(old_project_name)
-                self.project_selection_window.load_projects()
+                if old_project_name in self.open_dashboards:
+                    self.open_dashboards[new_project_name] = self.open_dashboards.pop(old_project_name)
                 QMessageBox.information(self, "Success", message)
                 self.file_bar.update_file_bar()
             else:
@@ -359,6 +410,9 @@ class DashboardWindow(QWidget):
             QMessageBox.warning(self, "Error", f"Error editing project: {str(e)}")
 
     def delete_project(self):
+        if not self.current_project:
+            QMessageBox.warning(self, "Error", "No project selected to delete!")
+            return
         reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete {self.current_project}?",
                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if reply == QMessageBox.Yes:
@@ -367,10 +421,9 @@ class DashboardWindow(QWidget):
                     self.db.reconnect()
                 success, message = self.db.delete_project(self.current_project)
                 if success:
-                    if self.current_project in self.project_selection_window.open_dashboards:
-                        del self.project_selection_window.open_dashboards[self.current_project]
-                    self.project_selection_window.load_projects()
-                    self.close()
+                    if self.current_project in self.open_dashboards:
+                        del self.open_dashboards[self.current_project]
+                    self.display_select_project()
                     QMessageBox.information(self, "Success", message)
                 else:
                     QMessageBox.warning(self, "Error", message)
@@ -420,8 +473,9 @@ class DashboardWindow(QWidget):
                 self.current_project = project_name
                 self.current_feature = feature_name
                 self.is_saving = False
+                self.sub_tool_bar.setVisible(True)  # Ensure SubToolBar is visible
                 self.sub_tool_bar.update_subtoolbar()
-                self.sub_tool_bar.current_feature_label.setText(feature_name)
+                logging.debug(f"Displaying feature: {feature_name} for project: {project_name}")
 
                 current_console_height = self.console.console_message_area.height()
 
@@ -434,7 +488,7 @@ class DashboardWindow(QWidget):
                             sub_window.show()
                         sub_window.raise_()
                         sub_window.activateWindow()
-                        self.main_section.arrange_layout(prompt_for_layout=False)
+                        self.main_section.arrange_layout()
                         self.console.console_message_area.setFixedHeight(current_console_height)
                         return
                     except RuntimeError:
@@ -444,7 +498,6 @@ class DashboardWindow(QWidget):
                         sub_window = None
 
                 feature_classes = {
-                    "Create Tags": CreateTagsFeature,
                     "Tabular View": TabularViewFeature,
                     "Time View": TimeViewFeature,
                     "Time Report": TimeReportFeature,
@@ -462,7 +515,10 @@ class DashboardWindow(QWidget):
                     try:
                         if not self.db.is_connected():
                             self.db.reconnect()
-                        feature_instance = feature_classes[feature_name](self, self.db, project_name)
+                        # Get the selected channel from TreeView
+                        selected_channel = self.tree_view.get_selected_channel()
+                        # Pass the selected channel to the feature
+                        feature_instance = feature_classes[feature_name](self, self.db, project_name, channel=selected_channel)
                         self.feature_instances[feature_name] = feature_instance
                         widget = feature_instance.get_widget()
                         if widget:
@@ -470,12 +526,14 @@ class DashboardWindow(QWidget):
                             sub_window.setWidget(widget)
                             sub_window.setWindowTitle(feature_name)
                             sub_window.setAttribute(Qt.WA_DeleteOnClose)
+                            # Initial size for subwindow
                             sub_window.resize(400, 300)
                             self.main_section.mdi_area.addSubWindow(sub_window)
                             self.sub_windows[feature_name] = sub_window
                             sub_window.show()
                             sub_window.closeEvent = lambda event, fn=feature_name: self.on_subwindow_closed(event, fn)
-                            self.main_section.arrange_layout(prompt_for_layout=False)
+                            # Arrange subwindows using the current layout
+                            self.main_section.arrange_layout()
                             self.console.console_message_area.setFixedHeight(current_console_height)
                         else:
                             logging.error(f"Feature {feature_name} returned invalid widget")
@@ -511,11 +569,11 @@ class DashboardWindow(QWidget):
             if self.current_feature == feature_name:
                 self.current_feature = None
                 self.is_saving = False
-                self.sub_tool_bar.current_feature_label.setText("")
                 self.sub_tool_bar.update_subtoolbar()
-            self.main_section.arrange_layout(prompt_for_layout=False)
+            self.main_section.arrange_layout()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
+            logging.debug(f"Closed subwindow for feature: {feature_name}")
         except Exception as e:
             logging.error(f"Error cleaning up sub-window for {feature_name}: {str(e)}")
         event.accept()
@@ -543,14 +601,17 @@ class DashboardWindow(QWidget):
                 self.display_feature_content(self.current_feature, self.current_project)
                 QMessageBox.information(self, "Refresh", f"Refreshed view for '{self.current_feature}'!")
             else:
-                self.display_feature_content("Create Tags", self.current_project)
-                QMessageBox.information(self, "Refresh", "Refreshed default view!")
+                self.display_select_project()
+                QMessageBox.information(self, "Refresh", "Refreshed project selection view!")
             self.file_bar.update_file_bar()
         except Exception as e:
             logging.error(f"Error refreshing view: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error refreshing view: {str(e)}")
 
     def display_dashboard(self):
+        if not self.current_project:
+            self.display_select_project()
+            return
         self.current_feature = None
         self.is_saving = False
         self.timer.stop()
@@ -577,14 +638,27 @@ class DashboardWindow(QWidget):
                     del self.feature_instances[feature_name]
                 except Exception as e:
                     logging.error(f"Error cleaning up feature instance {feature_name}: {str(e)}")
+            self.main_section.clear_widget()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
+            logging.debug("Cleared MainSection content layout")
+            logging.debug(f"Current widget in MainSection: {self.main_section.current_widget}")
         except Exception as e:
             logging.error(f"Error clearing content layout: {str(e)}")
 
     def settings_action(self):
         QMessageBox.information(self, "Settings", "Settings functionality not implemented yet.")
         self.file_bar.update_file_bar()
+
+    def back_to_login(self):
+        try:
+            if self.auth_window:
+                self.auth_window.show()
+                self.auth_window.showMaximized()
+            self.close()
+        except Exception as e:
+            logging.error(f"Error returning to login: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to return to login: {str(e)}")
 
     def closeEvent(self, event):
         try:
@@ -594,8 +668,6 @@ class DashboardWindow(QWidget):
             self.clear_content_layout()
             if self.db and self.db.is_connected():
                 self.db.close_connection()
-            if self.current_project in self.project_selection_window.open_dashboards:
-                del self.project_selection_window.open_dashboards[self.current_project]
             app = QApplication.instance()
             if app:
                 app.quit()
@@ -606,4 +678,10 @@ class DashboardWindow(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        QTimer.singleShot(50, lambda: self.main_section.arrange_layout(prompt_for_layout=False))
+        # Adjust splitter sizes on resize to maintain 15%/85% ratio when TreeView is visible
+        if self.tree_view.isVisible():
+            window_width = self.width()
+            tree_view_width = int(window_width * 0.15)
+            right_container_width = int(window_width * 0.85)
+            self.main_splitter.setSizes([tree_view_width, right_container_width])
+        QTimer.singleShot(50, lambda: self.main_section.arrange_layout())

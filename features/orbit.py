@@ -7,10 +7,11 @@ import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class OrbitFeature:
-    def __init__(self, parent, db, project_name):
+    def __init__(self, parent, db, project_name,channel=None):
         self.parent = parent
         self.db = db
         self.project_name = project_name
+        self.channel=channel
         self.widget = QWidget()
         self.mqtt_tag = None
         self.timer = QTimer(self.widget)

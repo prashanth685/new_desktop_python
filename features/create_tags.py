@@ -5,10 +5,11 @@ import logging
 # logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CreateTagsFeature:
-    def __init__(self, parent, db, project_name):
+    def __init__(self, parent, db, project_name, channel=None):
         self.parent = parent
         self.db = db
         self.project_name = project_name
+        self.channel = channel  # Accept channel parameter, even though it's not used
         self.widget = QWidget()
         self.initUI()
         if self.db is None or not hasattr(self.db, 'tags_collection'):
@@ -31,7 +32,6 @@ class CreateTagsFeature:
         add_tag_form = QHBoxLayout()
         self.tag_name_input = QLineEdit()
         self.tag_name_input.setPlaceholderText("Enter full tag (e.g., sarayu/tag1/topic1|m/s)")
-        # self.tag_name_input.setStyleSheet("background-color: #34495e; color: white; border: 1px solid #1a73e8; padding: 10px; height: 30px;width:50%;font-size:15px")
         self.tag_name_input.setStyleSheet("""
     QLineEdit {
         background-color: #2d3436;
@@ -46,7 +46,6 @@ class CreateTagsFeature:
         background-color: #1e272e;
     }
 """)
-
 
         add_tag_btn = QPushButton("Add Tag")
         add_tag_btn.setStyleSheet("""
@@ -106,7 +105,7 @@ class CreateTagsFeature:
             self.tags_table.setRowCount(len(tags_data))
             for row, tag in enumerate(tags_data):
                 self.tags_table.setItem(row, 0, QTableWidgetItem(tag["tag_name"]))
-                latest_data = self.db.get_tag_values(self.project_name, tag["tag_name"])
+                latest_data = self.db.get_tag_values(self.project_name, tag["model_name"], tag["tag_name"])
                 value = latest_data[-1]["values"][-1] if latest_data else "N/A"
                 self.tags_table.setItem(row, 1, QTableWidgetItem(str(value)))
 
@@ -153,7 +152,9 @@ class CreateTagsFeature:
             QMessageBox.warning(self.parent, "Error", "Invalid tag format.")
             return
 
-        success, message = self.db.add_tag(self.project_name, tag_data)
+        # Since CreateTagsFeature doesn't use model-specific tags, use a default model name
+        model_name = "default_model"
+        success, message = self.db.add_tag(self.project_name, model_name, tag_data)
         if success:
             self.tag_name_input.clear()
             if hasattr(self.parent, 'mqtt_handler') and self.parent.mqtt_handler and hasattr(self.parent.mqtt_handler, 'client'):
@@ -187,6 +188,7 @@ class CreateTagsFeature:
                 if new_tag_data is None:
                     QMessageBox.warning(self.parent, "Error", "Invalid tag format.")
                     return
+                model_name = tag.get("model_name", "default_model")
                 if hasattr(self.parent, 'mqtt_handler') and self.parent.mqtt_handler and hasattr(self.parent.mqtt_handler, 'client'):
                     try:
                         self.parent.mqtt_handler.client.unsubscribe(tag["tag_name"])
@@ -197,7 +199,7 @@ class CreateTagsFeature:
                         QMessageBox.warning(self.parent, "Error", f"Failed to update MQTT subscription: {str(e)}")
                 else:
                     logging.warning("MQTT handler or client not properly initialized.")
-                success, message = self.db.edit_tag(self.project_name, row, new_tag_data)
+                success, message = self.db.edit_tag(self.project_name, model_name, row, new_tag_data)
                 if success:
                     self.update_table()
                 else:
@@ -220,6 +222,7 @@ class CreateTagsFeature:
                 if row >= len(tags_data):
                     return
                 tag = tags_data[row]
+                model_name = tag.get("model_name", "default_model")
                 if hasattr(self.parent, 'mqtt_handler') and self.parent.mqtt_handler and hasattr(self.parent.mqtt_handler, 'client'):
                     try:
                         self.parent.mqtt_handler.client.unsubscribe(tag["tag_name"])
@@ -229,7 +232,7 @@ class CreateTagsFeature:
                         QMessageBox.warning(self.parent, "Error", f"Failed to unsubscribe from tag: {str(e)}")
                 else:
                     logging.warning("MQTT handler or client not properly initialized.")
-                success, message = self.db.delete_tag(self.project_name, row)
+                success, message = self.db.delete_tag(self.project_name, model_name, row)
                 if success:
                     self.update_table()
                 else:

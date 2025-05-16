@@ -42,14 +42,21 @@ class TimeViewFeature:
         return self.widget
 
     def get_next_filename_counter(self):
-        filenames = self.db.get_distinct_filenames(self.project_name)
-        max_counter = 0
-        for filename in filenames:
-            match = re.match(r"data(\d+)", filename)
-            if match:
-                counter = int(match.group(1))
-                max_counter = max(max_counter, counter)
-        return max_counter + 1
+        try:
+            filenames = self.db.get_distinct_filenames(self.project_name)
+            max_counter = 0
+            for filename in filenames:
+                match = re.match(r"data(\d+)", filename)
+                if match:
+                    counter = int(match.group(1))
+                    max_counter = max(max_counter, counter)
+            counter = max_counter + 1
+            logging.debug(f"Next filename counter for project {self.project_name}: {counter}")
+            return counter
+        except Exception as e:
+            logging.error(f"Error getting next filename counter: {str(e)}")
+            self.parent.append_to_console(f"Error getting next filename counter: {str(e)}")
+            return 1  # Default to 1 if there's an error
 
     def initUI(self):
         main_layout = QVBoxLayout()
@@ -67,126 +74,6 @@ class TimeViewFeature:
         header.setStyleSheet("color: white; font-size: 20px; font-weight: bold; margin-bottom: 10px;")
         self.header = header
         control_layout.addWidget(header, alignment=Qt.AlignCenter)
-
-        # Save controls row
-        save_layout = QHBoxLayout()
-        filename_label = QLabel("Saving File:")
-        filename_label.setStyleSheet("color: white; font-size: 16px; font-weight: bold; margin-right: 15px;")
-
-        self.filename_combo = QComboBox()
-        self.filename_combo.setStyleSheet("""
-            QComboBox {
-                background-color: #ffffff;
-                color: #212121;
-                border: 1px solid #90caf9;
-                border-radius: 4px;
-                padding: 4px 8px;
-                font-size: 14px;
-                font-weight: 500;
-                min-width: 200px;
-                max-width: 250px;
-            }
-            QComboBox:hover {
-                border: 1px solid #42a5f5;
-                background-color: #f5faff;
-            }
-            QComboBox:focus {
-                border: 1px solid #1e88e5;
-                background-color: #ffffff;
-            }
-            QComboBox::drop-down {
-                width: 25px;
-                border-left: 1px solid #e0e0e0;
-                background-color: #e3f2fd;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                border: 1px solid #90caf9;
-                border-radius: 4px;
-                padding: 3px;
-                selection-background-color: #e3f2fd;
-                selection-color: #0d47a1;
-                font-size: 14px;
-                outline: 0;
-            }
-            QComboBox::item {
-                padding: 4px 6px;
-            }
-            QComboBox::item:selected {
-                background-color: #bbdefb;
-                color: #0d47a1;
-            }
-        """)
-        self.filename_combo.setEnabled(False)
-        self.refresh_filenames()
-        self.filename_combo.currentTextChanged.connect(self.open_data_table)
-
-        self.start_save_button = QPushButton("Start Saving")
-        self.start_save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1a73e8;
-                color: white;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-left: 10px;
-            }
-            QPushButton:disabled {
-                background-color: #E0E0E0;
-                color: red;
-                border: 1px solid #BDBDBD;
-            }
-        """)
-        self.start_save_button.clicked.connect(self.start_saving)
-
-        self.stop_save_button = QPushButton("Stop Saving")
-        self.stop_save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #e63946;
-                color: white;
-                padding: 6px 12px;
-                border-radius: 4px;
-                font-size: 14px;
-                font-weight: bold;
-                margin-left: 10px;
-            }
-            QPushButton::pressed {
-                background-color: red;
-            }
-        """)
-        self.stop_save_button.clicked.connect(self.stop_saving)
-        self.stop_save_button.setEnabled(False)
-
-        self.timer_label = QLabel("Save Duration: 00:00:00")
-        self.timer_label.setStyleSheet("color: white; font-size: 14px; font-weight: 500; margin-left: 15px;")
-
-        save_layout.addWidget(filename_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        save_layout.addWidget(self.filename_combo, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        save_layout.addWidget(self.start_save_button, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        save_layout.addWidget(self.stop_save_button, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        save_layout.addWidget(self.timer_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        save_layout.addStretch()
-        save_layout.setSpacing(0)
-        control_layout.addLayout(save_layout)
-
-        # Time info row
-        time_info_layout = QHBoxLayout()
-        self.start_time_label = QLabel("Start Time: N/A")
-        self.start_time_label.setStyleSheet("color: white; font-size: 14px; font-weight: 500;")
-        self.end_time_label = QLabel("End Time: N/A")
-        self.end_time_label.setStyleSheet("color: white; font-size: 14px; font-weight: 500; margin-left: 20px;")
-        self.latest_filename_label = QLabel(f"Saving File: data{self.filename_counter}")
-        self.latest_filename_label.setStyleSheet("color: white; font-size: 14px; font-weight: 500; margin-left: 20px;")
-
-        time_info_layout.addWidget(self.start_time_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        time_info_layout.addWidget(self.end_time_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        time_info_layout.addWidget(self.latest_filename_label, alignment=Qt.AlignLeft | Qt.AlignVCenter)
-        time_info_layout.addStretch()
-        time_info_layout.setSpacing(0)
-        control_layout.addLayout(time_info_layout)
 
         control_layout.setSpacing(15)
         control_layout.setContentsMargins(0, 0, 0, 0)
@@ -206,18 +93,12 @@ class TimeViewFeature:
             hours = int(seconds // 3600)
             minutes = int((seconds % 3600) // 60)
             seconds = int(seconds % 60)
-            self.timer_label.setText(f"Save Duration: {hours:02d}:{minutes:02d}:{seconds:02d}")
-            current_time_str = datetime.now().strftime("%H:%M:%S")
-            self.end_time_label.setText(f"End Time: {current_time_str}")
+            # Removed timer_label update since it's no longer in the UI
 
     def refresh_filenames(self):
-        self.filename_combo.clear()
+        # Method still needed for SubToolBar to call
         filenames = self.db.get_distinct_filenames(self.project_name)
-        for filename in filenames:
-            self.filename_combo.addItem(filename)
-        self.filename_combo.addItem(f"data{self.filename_counter}")
-        self.filename_combo.setCurrentText(f"data{self.filename_counter}")
-        self.latest_filename_label.setText(f"Saving File: data{self.filename_counter}")
+        return filenames
 
     def open_data_table(self, selected_filename):
         if "(Next)" in selected_filename:
@@ -227,7 +108,9 @@ class TimeViewFeature:
 
     def on_delete(self, deleted_filename):
         self.filename_counter = self.get_next_filename_counter()
-        self.refresh_filenames()
+        # Notify SubToolBar to refresh filenames
+        if hasattr(self.parent, 'sub_toolbar'):
+            self.parent.sub_toolbar.refresh_filenames()
 
     def start_saving(self):
         if not self.mqtt_tag:
@@ -239,40 +122,31 @@ class TimeViewFeature:
         self.is_saving = True
         self.frame_index = 0
         self.save_start_time = datetime.now()
-        self.start_save_button.setEnabled(False)
-        self.stop_save_button.setEnabled(True)
         self.save_timer.start(1000)
         self.parent.is_saving = True
-        start_time_str = self.save_start_time.strftime("%H:%M:%S")
-        self.start_time_label.setText(f"Start Time: {start_time_str}")
-        self.end_time_label.setText(f"End Time: {start_time_str}")
-        self.latest_filename_label.setText(f"Saving File: {filename}")
         logging.info(f"Started saving data for {self.mqtt_tag} with filename {filename}")
         self.parent.append_to_console(f"Started saving data for {self.mqtt_tag} with filename {filename}")
+        # Notify SubToolBar to update its UI
+        if hasattr(self.parent, 'sub_toolbar'):
+            self.parent.sub_toolbar.update_subtoolbar()
 
     def stop_saving(self):
         if not self.is_saving:
             return
 
         self.is_saving = False
-        self.start_save_button.setEnabled(True)
-        self.stop_save_button.setEnabled(False)
         self.save_timer.stop()
         stop_time = datetime.now()
         self.save_end_time = stop_time
         self.parent.is_saving = False
-        filename = f"data{self.filename_counter}"
         self.filename_counter += 1
-        start_time_str = self.save_start_time.strftime("%H:%M:%S") if self.save_start_time else "N/A"
-        stop_time_str = stop_time.strftime("%H:%M:%S")
-        self.timer_label.setText("Save Duration: 00:00:00")
-        self.start_time_label.setText(f"Start Time: {start_time_str}")
-        self.end_time_label.setText(f"End Time: {stop_time_str}")
-        self.latest_filename_label.setText(f"Saving File: data{self.filename_counter}")
         logging.info(f"Stopped saving data for {self.mqtt_tag}")
         self.parent.append_to_console(f"Stopped saving data for {self.mqtt_tag}")
         self.save_start_time = None
-        self.refresh_filenames()
+        # Notify SubToolBar to update its UI and filenames
+        if hasattr(self.parent, 'sub_toolbar'):
+            self.parent.sub_toolbar.refresh_filenames()
+            self.parent.sub_toolbar.update_subtoolbar()
 
     def setup_time_view_plot(self):
         if not self.project_name or not self.mqtt_tag:
@@ -293,13 +167,7 @@ class TimeViewFeature:
         self.time_view_timestamps.clear()
         self.last_data_time = None
         self.is_saving = False
-        self.start_save_button.setEnabled(True)
-        self.stop_save_button.setEnabled(False)
         self.save_timer.stop()
-        self.timer_label.setText("Save Duration: 00:00:00")
-        self.start_time_label.setText("Start Time: N/A")
-        self.end_time_label.setText("End Time: N/A")
-        self.latest_filename_label.setText(f"Saving File: data{self.filename_counter}")
         self.frame_index = 0
         self.parent.is_saving = False
 
@@ -360,7 +228,7 @@ class TimeViewFeature:
                 self.parent.append_to_console(f"Unexpected number of plot values: {len(plot_values)}")
                 return
 
-            # Assume first channel’s data for simplicity (or adjust if channel index is known)
+            # Assume first channel's data for simplicity (or adjust if channel index is known)
             num_samples = len(plot_values) // number_of_channels
             start_time = datetime.fromisoformat(timestamp.replace('Z', '+00:00')) if 'Z' in timestamp else datetime.fromisoformat(timestamp)
             timestamps = [start_time + timedelta(seconds=i / self.data_rate) for i in range(num_samples)]
@@ -368,7 +236,7 @@ class TimeViewFeature:
             for i in range(0, len(plot_values), number_of_channels):
                 sample_idx = i // number_of_channels
                 try:
-                    sample_value = float(plot_values[i])  # Take first channel’s value
+                    sample_value = float(plot_values[i])  # Take first channel's value
                     self.time_view_buffer.append(sample_value)
                     self.time_view_timestamps.append(timestamps[sample_idx])
                 except (ValueError, TypeError) as e:
@@ -391,10 +259,10 @@ class TimeViewFeature:
                     "slot7": slot7,
                     "slot8": slot8,
                     "slot9": slot9,
-                    "message": [plot_values[i] for i in range(0, len(plot_values), number_of_channels)],  # Store first channel’s values
+                    "message": [plot_values[i] for i in range(0, len(plot_values), number_of_channels)],  # Store first channel's values
                     "createdAt": timestamp
                 }
-                success, msg = self.db.save_timeview_message(self.project_name, message_data)
+                success, msg = self.db.save_timeview_message(self.project_name, "default_model", message_data)
                 if success:
                     self.frame_index += 1
                     self.header.setText(f"TIME VIEW FOR {self.project_name.upper()} - Channel: {self.channel}")
@@ -404,13 +272,10 @@ class TimeViewFeature:
                     logging.error(f"Failed to save data: {msg}")
                     self.parent.append_to_console(f"Failed to save data: {msg}")
                     self.is_saving = False
-                    self.start_save_button.setEnabled(True)
-                    self.stop_save_button.setEnabled(False)
                     self.save_timer.stop()
-                    self.start_time_label.setText("Start Time: N/A")
-                    self.end_time_label.setText("End Time: N/A")
-                    self.timer_label.setText("Save Duration: 00:00:00")
-                    QMessageBox.critical(self.widget, "Error", f"Failed to save data: {msg}")
+                    self.save_start_time = None
+                    if hasattr(self.parent, 'sub_toolbar'):
+                        self.parent.sub_toolbar.update_subtoolbar()
 
         except Exception as e:
             logging.error(f"Error processing values: {e}")

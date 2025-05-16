@@ -5,12 +5,14 @@ import logging
 # logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TabularViewFeature:
-    def __init__(self, parent, db, project_name):
+    def __init__(self, parent, db, project_name,channel=None):
         self.parent = parent
         self.db = db
         self.project_name = project_name
+        self.channel = channel  # Accept channel parameter, even though it's not used
         self.widget = QWidget()
         self.initUI()
+
 
     def initUI(self):
         layout = QVBoxLayout()

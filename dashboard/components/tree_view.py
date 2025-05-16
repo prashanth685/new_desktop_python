@@ -1,9 +1,9 @@
-from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox,QWidget,QVBoxLayout
+from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox, QWidget, QVBoxLayout
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TreeView(QWidget):
     def __init__(self, parent=None):
@@ -24,7 +24,7 @@ class TreeView(QWidget):
             QTreeWidget::item:hover { background-color: #34495e; }
             QTreeWidget::item:selected { background-color: #4a90e2; color: white; }
         """)
-        self.tree.setFixedWidth(250)
+        self.tree.setFixedWidth(350)
         self.tree.itemClicked.connect(self.handle_item_clicked)
 
         layout = QVBoxLayout()
@@ -53,7 +53,7 @@ class TreeView(QWidget):
                     channels = []
 
                 model_item = QTreeWidgetItem(project_item)
-                model_item.setText(0, f"🖥️ {model_name}")
+                model_item.setText(0, f"🖥️ {models[0]['name']}")
                 model_item.setData(0, Qt.UserRole, {"type": "model", "name": model_name, "project": project_name})
 
                 for channel in channels:
@@ -92,7 +92,7 @@ class TreeView(QWidget):
                 self.selected_channel_item = item
                 item.setBackground(0, QColor("#28a745"))
                 self.parent_widget.display_feature_content("Time View", self.project_name)
-            logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}")
+            logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}, selected channel: {self.selected_channel}")
         except Exception as e:
             logging.error(f"Error handling tree item click: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error handling tree item click: {str(e)}")

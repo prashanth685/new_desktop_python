@@ -1,124 +1,118 @@
-
-from PyQt5.QtWidgets import QMdiArea, QInputDialog, QMessageBox
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QMdiArea, QScrollArea
+from PyQt5.QtCore import Qt
 import logging
 
-class MainSection(QMdiArea):
-    def __init__(self, parent):
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class MainSection(QWidget):
+    def __init__(self, parent=None):
         super().__init__(parent)
         self.parent = parent
+        self.current_widget = None
+        self.current_layout = "2x2"  # Default layout
         self.initUI()
 
     def initUI(self):
-        self.setStyleSheet("QMdiArea { background-color: #263238; border: none; }")
+        self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(0, 0, 0, 0)
+        self.layout.setSpacing(0)
 
-    def arrange_layout(self, prompt_for_layout=False):
-        try:
-            sub_windows = list(self.parent.sub_windows.values())
-            if not sub_windows:
-                self.parent.console.append_to_console("No sub-windows to arrange.")
-                return
+        # Wrap QMdiArea in a QScrollArea to enable scrolling
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("""
+            QScrollArea { background-color: #263238; border: none; }
+            QScrollBar:vertical {
+                border: none;
+                background: #2c3e50;
+                width: 10px;
+                margin: 0px 0px 0px 0px;
+            }
+            QScrollBar::handle:vertical {
+                background: #4a90e2;
+                border-radius: 5px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                background: none;
+            }
+        """)
 
-            if prompt_for_layout:
-                layout_options = ["1x2", "2x2", "3x3"]
-                layout_choice, ok = QInputDialog.getItem(self.parent, "Select Layout",
-                                                        "Choose a layout:",
-                                                        layout_options, layout_options.index(f"{self.parent.current_layout[0]}x{self.parent.current_layout[1]}"), False)
-                if not ok or not layout_choice:
-                    self.parent.console.append_to_console("Layout selection cancelled.")
-                    return
-                rows, cols = map(int, layout_choice.split('x'))
-                self.parent.current_layout = (rows, cols)
-            else:
-                rows, cols = self.parent.current_layout
+        self.mdi_area = QMdiArea()
+        self.mdi_area.setStyleSheet("QMdiArea { background-color: #263238; border: none; }")
+        self.mdi_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        self.mdi_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
 
-            GAP = 10
-            num_windows = len(sub_windows)
+        # Set the QMdiArea as the widget for the QScrollArea
+        self.scroll_area.setWidget(self.mdi_area)
+        self.layout.addWidget(self.scroll_area)
 
-            # Get MDI area dimensions
-            mdi_rect = self.viewport().rect()
-            mdi_width = mdi_rect.width()
-            mdi_height = mdi_rect.height()
+        self.setLayout(self.layout)
 
-            if rows == 1 and cols == 2:
-                windows_per_grid = 2
-                num_grids = (num_windows + 1) // 2
-                total_vertical_gaps = (num_grids - 1) * GAP if num_grids > 1 else 0
-                window_width = max(700, (mdi_width) // 2)
-                window_height = max(700, (mdi_height) // 2)
+    def set_widget(self, widget):
+        self.clear_widget()
+        self.current_widget = widget
+        self.layout.addWidget(widget)
+        self.scroll_area.hide()
+        logging.debug(f"Set widget in MainSection: {type(widget).__name__}")
 
-                total_content_height = num_grids * (window_height + GAP) + total_vertical_gaps
+    def clear_widget(self):
+        if self.current_widget:
+            self.layout.removeWidget(self.current_widget)
+            self.current_widget.hide()
+            self.current_widget.setParent(None)
+            self.current_widget.deleteLater()
+            self.current_widget = None
+            logging.debug("Cleared custom widget from MainSection")
+        self.scroll_area.show()
+        logging.debug("Scroll area with MDI area shown in MainSection")
 
-                for i, sub_window in enumerate(sub_windows):
-                    try:
-                        grid_index = i // windows_per_grid
-                        col_in_grid = i % 2
+    def arrange_layout(self, layout=None, prompt_for_layout=False):
+        if self.current_widget:
+            logging.debug("Skipping MDI arrangement due to custom widget")
+            return  # Don't arrange MDI subwindows if a custom widget is displayed
 
-                        x = col_in_grid * (window_width)
-                        y = grid_index * (window_height)
+        # Update the current layout if a new one is provided
+        if layout:
+            self.current_layout = layout
 
-                        sub_window.setGeometry(x, y, window_width, window_height)
-                        sub_window.showNormal()
-                        sub_window.raise_()
-                    except Exception as e:
-                        logging.error(f"Error arranging sub-window {i}: {str(e)}")
-                        self.parent.console.append_to_console(f"Error arranging sub-window {i}: {str(e)}")
+        subwindows = self.mdi_area.subWindowList()
+        if not subwindows:
+            return
 
-                self.setMinimumHeight(mdi_height)
-                self.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-                self.setMinimumSize(0, 0)
-                self.viewport().update()
+        # Ensure all subwindows are visible and not minimized
+        for subwindow in subwindows:
+            subwindow.showNormal()
 
-            else:
-                windows_per_grid = rows * cols
-                num_grids = (num_windows + windows_per_grid - 1) // windows_per_grid
-                horizontal_gaps_per_grid = (cols - 1) * GAP if cols > 1 else 0
-                vertical_gaps_per_grid = (rows - 1) * GAP if rows > 1 else 0
-                total_horizontal_gaps = horizontal_gaps_per_grid
-                total_vertical_gaps = (num_grids - 1) * GAP if num_grids > 1 else 0
-                total_vertical_gaps += vertical_gaps_per_grid * num_grids
+        # Parse the layout (e.g., "1x2" -> rows=1, cols=2)
+        rows, cols = map(int, self.current_layout.split('x'))
 
-                available_width = mdi_width - total_horizontal_gaps
-                base_window_width = max(300, available_width // max(1, cols))
-                base_window_height = max(200, (mdi_height - vertical_gaps_per_grid) // max(1, rows))
+        # Calculate the size of the visible area (excluding scrollbars)
+        viewport_width = self.scroll_area.viewport().width()
+        viewport_height = self.scroll_area.viewport().height()
 
-                for i, sub_window in enumerate(sub_windows):
-                    try:
-                        grid_index = i // windows_per_grid
-                        index_in_grid = i % windows_per_grid
-                        row_in_grid = index_in_grid // cols
-                        col_in_grid = index_in_grid % cols
+        # Calculate the size for each subwindow in the grid
+        subwindow_width = viewport_width // cols
+        subwindow_height = viewport_height // rows
 
-                        x = col_in_grid * (base_window_width + GAP)
-                        y = (grid_index * (rows * base_window_height + vertical_gaps_per_grid + GAP)) + (row_in_grid * (base_window_height + GAP))
+        # Arrange subwindows in the selected grid pattern
+        for idx, subwindow in enumerate(subwindows):
+            # Determine the row and column for the current subwindow
+            page = idx // (rows * cols)  # Which "page" of the grid (for scrolling)
+            idx_in_page = idx % (rows * cols)  # Index within the current page
+            row = idx_in_page // cols
+            col = idx_in_page % cols
 
-                        window_width = base_window_width
-                        window_height = base_window_height
+            # Calculate position for the subwindow
+            x = col * subwindow_width
+            y = (page * viewport_height) + (row * subwindow_height)
 
-                        if col_in_grid == cols - 1:
-                            remaining_width = mdi_width - x - (cols - 1) * GAP
-                            window_width = max(300, remaining_width)
+            # Resize and move the subwindow
+            subwindow.setGeometry(x, y, subwindow_width, subwindow_height)
 
-                        if row_in_grid == rows - 1:
-                            grid_top = grid_index * (rows * base_window_height + vertical_gaps_per_grid + GAP)
-                            grid_height = (rows * base_window_height + (rows - 1) * GAP)
-                            remaining_height = (mdi_height - grid_top - grid_height) // max(1, num_grids)
-                            window_height = max(200, base_window_height + remaining_height // rows)
+        # Adjust the size of the QMdiArea to accommodate all subwindows
+        total_pages_needed = (len(subwindows) + (rows * cols) - 1) // (rows * cols)
+        total_height = total_pages_needed * viewport_height
+        total_width = cols * subwindow_width
+        self.mdi_area.setMinimumSize(total_width, total_height)
 
-                        sub_window.setGeometry(x, y, window_width, window_height)
-                        sub_window.showNormal()
-                        sub_window.raise_()
-                    except Exception as e:
-                        logging.error(f"Error arranging sub-window {i}: {str(e)}")
-                        self.parent.console.append_to_console(f"Error arranging sub-window {i}: {str(e)}")
-
-                total_height = num_grids * (rows * base_window_height + vertical_gaps_per_grid) + (num_grids - 1) * GAP
-                self.setMinimumHeight(min(total_height, mdi_height))
-
-            layout_str = f"{rows}x{cols}"
-            logging.info(f"Arranged {num_windows} sub-windows in {layout_str} grid layout ({num_grids} grids) with 10px gaps")
-            self.parent.console.append_to_console(f"Arranged {num_windows} sub-windows in {layout_str} grid layout ({num_grids} grids) with 10px gaps")
-        except Exception as e:
-            logging.error(f"Error arranging layout: {str(e)}")
-            QMessageBox.warning(self.parent, "Error", f"Error arranging layout: {str(e)}")
-            self.parent.console.append_to_console(f"Error arranging layout: {str(e)}")
+        logging.info(f"Arranged {len(subwindows)} MDI subwindows in a {self.current_layout} grid pattern")
