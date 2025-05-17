@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QMdiArea, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QMdiArea, QScrollArea, QMdiSubWindow
 from PyQt5.QtCore import Qt
 import logging
 
@@ -48,12 +48,32 @@ class MainSection(QWidget):
 
         self.setLayout(self.layout)
 
-    def set_widget(self, widget):
+    def set_widget(self, widget, feature_name=None, channel_name=None, model_name=None):
         self.clear_widget()
         self.current_widget = widget
         self.layout.addWidget(widget)
         self.scroll_area.hide()
         logging.debug(f"Set widget in MainSection: {type(widget).__name__}")
+
+    def add_subwindow(self, widget, feature_name, channel_name=None, model_name=None):
+        # Create a subwindow
+        subwindow = QMdiSubWindow()
+        subwindow.setWidget(widget)
+        
+        # Set the title based on the feature
+        if feature_name in ["Time View", "Time Report"]:
+            title = f"{type(widget).__name__} - {model_name if model_name else 'Unknown Model'}"
+        else:
+            title = f"{type(widget).__name__} - {channel_name if channel_name else 'Unknown Channel'}"
+        subwindow.setWindowTitle(title)
+        
+        # Add the subwindow to the MDI area
+        self.mdi_area.addSubWindow(subwindow)
+        subwindow.show()
+        
+        # Arrange the subwindows according to the current layout
+        self.arrange_layout()
+        logging.debug(f"Added subwindow in MainSection: {title}")
 
     def clear_widget(self):
         if self.current_widget:

@@ -1,10 +1,9 @@
 import sys
 import gc
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSplitter, QSizePolicy, QApplication, QMdiSubWindow, QMessageBox, QInputDialog
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSplitter, QSizePolicy, QApplication, QMessageBox, QInputDialog
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import QIcon, QColor
 import logging
-import uuid
 from dashboard.components.file_bar import FileBar
 from dashboard.components.tool_bar import ToolBar
 from dashboard.components.sub_tool_bar import SubToolBar
@@ -13,7 +12,6 @@ from dashboard.components.tree_view import TreeView
 from dashboard.components.console import Console
 from dashboard.components.mqtt_status import MQTTStatus
 from mqtthandler import MQTTHandler
-# from features.create_tags import CreateTagsFeature
 from features.tabular_view import TabularViewFeature
 from features.time_view import TimeViewFeature
 from features.fft_view import FFTViewFeature
@@ -233,7 +231,7 @@ class DashboardWindow(QWidget):
             logging.debug("ProjectStructureWidget removed from MainSection")
         self.load_project_features()
         self.setup_mqtt()
-        self.display_feature_content("Create Tags", self.current_project)
+        self.display_feature_content("Time View", self.current_project)
 
     def setup_mqtt(self):
         if not self.current_project:
@@ -279,7 +277,7 @@ class DashboardWindow(QWidget):
             if not self.db.is_connected():
                 self.db.reconnect()
             tags = list(self.db.tags_collection.find({"project_name": self.current_project}))
-            return [tag["tag_name"] for tag in tags]
+            return [{"tag_name": tag["tag_name"], "model_name": tag.get("model_name", "default_model")} for tag in tags]
         except Exception as e:
             logging.error(f"Failed to retrieve project tags: {str(e)}")
             return []
@@ -327,12 +325,12 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
             self.mqtt_status.update_mqtt_status_indicator()
 
-    def on_data_received(self, tag_name, values):
+    def on_data_received(self, tag_name, model_name, values):
         if self.current_feature and self.current_project:
             feature_instance = self.feature_instances.get(self.current_feature)
             if feature_instance and hasattr(feature_instance, 'on_data_received'):
                 try:
-                    feature_instance.on_data_received(tag_name, values)
+                    feature_instance.on_data_received(tag_name, model_name, values)
                 except Exception as e:
                     logging.error(f"Error in on_data_received for {self.current_feature}: {str(e)}")
 
@@ -398,7 +396,7 @@ class DashboardWindow(QWidget):
                 if self.current_feature:
                     self.display_feature_content(self.current_feature, self.current_project)
                 else:
-                    self.display_feature_content("Create Tags", self.current_project)
+                    self.display_feature_content("Time View", self.current_project)
                 if old_project_name in self.open_dashboards:
                     self.open_dashboards[new_project_name] = self.open_dashboards.pop(old_project_name)
                 QMessageBox.information(self, "Success", message)
@@ -515,25 +513,42 @@ class DashboardWindow(QWidget):
                     try:
                         if not self.db.is_connected():
                             self.db.reconnect()
-                        # Get the selected channel from TreeView
+                        # Get the selected channel and model from TreeView
                         selected_channel = self.tree_view.get_selected_channel()
-                        # Pass the selected channel to the feature
-                        feature_instance = feature_classes[feature_name](self, self.db, project_name, channel=selected_channel)
+                        selected_model = self.tree_view.get_selected_model()
+
+                        # Determine which features require a model vs a channel
+                        if feature_name in ["Time View", "Time Report"]:
+                            if not selected_model:
+                                self.console.append_to_console(f"Please select a model to view {feature_name}.")
+                                return
+                            # Pass the model name to Time View and Time Report
+                            feature_instance = feature_classes[feature_name](
+                                self, self.db, project_name, channel=selected_channel, model_name=selected_model
+                            )
+                        else:
+                            if not selected_channel:
+                                self.console.append_to_console(f"Please select a channel to view {feature_name}.")
+                                return
+                            # Pass the channel to other features
+                            feature_instance = feature_classes[feature_name](
+                                self, self.db, project_name, channel=selected_channel
+                            )
+
                         self.feature_instances[feature_name] = feature_instance
                         widget = feature_instance.get_widget()
                         if widget:
-                            sub_window = QMdiSubWindow()
-                            sub_window.setWidget(widget)
-                            sub_window.setWindowTitle(feature_name)
-                            sub_window.setAttribute(Qt.WA_DeleteOnClose)
-                            # Initial size for subwindow
-                            sub_window.resize(400, 300)
-                            self.main_section.mdi_area.addSubWindow(sub_window)
+                            # Use MainSection's add_subwindow method to create and manage the subwindow
+                            self.main_section.add_subwindow(
+                                widget,
+                                feature_name,
+                                channel_name=selected_channel,
+                                model_name=selected_model
+                            )
+                            # Store the subwindow in self.sub_windows
+                            sub_window = self.main_section.mdi_area.subWindowList()[-1]  # Get the last added subwindow
                             self.sub_windows[feature_name] = sub_window
-                            sub_window.show()
                             sub_window.closeEvent = lambda event, fn=feature_name: self.on_subwindow_closed(event, fn)
-                            # Arrange subwindows using the current layout
-                            self.main_section.arrange_layout()
                             self.console.console_message_area.setFixedHeight(current_console_height)
                         else:
                             logging.error(f"Feature {feature_name} returned invalid widget")
@@ -616,7 +631,7 @@ class DashboardWindow(QWidget):
         self.is_saving = False
         self.timer.stop()
         self.sub_tool_bar.update_subtoolbar()
-        self.display_feature_content("Create Tags", self.current_project)
+        self.display_feature_content("Time View", self.current_project)
         self.file_bar.update_file_bar()
 
     def clear_content_layout(self):

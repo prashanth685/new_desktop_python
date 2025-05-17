@@ -5,21 +5,22 @@ import struct
 from datetime import datetime
 import time
 import random
+import os
 
 class MQTTWorker(QObject):
-    data_received = pyqtSignal(str, str, list)  # Added model_name to signal
+    data_received = pyqtSignal(str, str, list)
     connected = pyqtSignal()
     connection_failed = pyqtSignal(str)
     stopped = pyqtSignal()
     error_occurred = pyqtSignal(str)
     status_update = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.175", port=1883):
+    def __init__(self, db, project_name, broker=None, port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
-        self.broker = broker
-        self.port = port
+        self.broker = broker or os.getenv("MQTT_BROKER", "192.168.1.175")
+        self.port = int(os.getenv("MQTT_PORT", port))
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message
@@ -27,13 +28,13 @@ class MQTTWorker(QObject):
         self.pending_subscriptions = set()
         self.running = False
         self.base_retry_interval = 5
-        self.max_retries = 5
+        self.max_retries = 10  # Increased for better reliability
         self.retry_count = 0
 
     def start(self):
         if not self.running:
             self.running = True
-            self.status_update.emit("Initiating connection to MQTT broker...")
+            self.status_update.emit(f"Initiating connection to MQTT broker at {self.broker}:{self.port}...")
             self.connect_with_retry()
             self.client.loop_start()
             logging.info("MQTT worker loop started")
@@ -102,6 +103,10 @@ class MQTTWorker(QObject):
         if not tags:
             logging.warning(f"No tags found for project {self.project_name}")
             self.status_update.emit(f"No tags found for project {self.project_name}")
+            # Emit dummy data for testing
+            dummy_values = [0, 0, 1, 4096, 4096, 1] + [32768 + int(10000 * random.random()) for _ in range(4096)]
+            self.data_received.emit("test_topic", "default_model", dummy_values)
+            logging.info("Emitted dummy data for testing due to no tags found")
             return
         for tag in tags:
             topic = tag["tag_name"]
@@ -123,20 +128,21 @@ class MQTTWorker(QObject):
         logging.debug(f"Received message on {topic}, payload size: {len(payload)} bytes")
 
         try:
+            if len(payload) < 20:  # Minimum 10 uint16_t values (header)
+                raise ValueError(f"Payload too short: {len(payload)} bytes")
             if len(payload) % 2 != 0:
                 raise ValueError("Payload size is not a multiple of 2, cannot unpack as uint16_t")
             values = list(struct.unpack(f"{len(payload) // 2}H", payload))
-            logging.debug(f"First 5 values: {values[:5]}")
-            
-            if not values:
-                raise ValueError("Empty or invalid payload")
-            
+            logging.debug(f"First 10 values: {values[:10]}")
+
+            if len(values) < 10:
+                raise ValueError("Insufficient values after unpacking")
+
             tag_name = topic
             timestamp = datetime.now().isoformat()
-            
-            # Find the model associated with this tag
+
             tag = self.db.tags_collection.find_one({"project_name": self.project_name, "tag_name": tag_name})
-            model_name = tag.get("model_name", "Unknown") if tag else "Unknown"
+            model_name = tag.get("model_name", "default_model") if tag else "default_model"
 
             success, message = self.db.update_tag_value(self.project_name, tag_name, values, timestamp)
             if success:
@@ -145,25 +151,25 @@ class MQTTWorker(QObject):
             else:
                 logging.error(f"Failed to process values: {message}")
                 self.error_occurred.emit(f"Failed to process values for {tag_name}: {message}")
-        
-        except struct.error as se:
-            logging.error(f"Failed to unpack binary data on {topic}: {str(se)}")
-            self.error_occurred.emit(f"Failed to unpack binary data on {topic}: {str(se)}")
+
+        except (struct.error, ValueError) as e:
+            logging.error(f"Failed to process message on {topic}: {str(e)}")
+            self.error_occurred.emit(f"Failed to process message on {topic}: {str(e)}")
         except Exception as e:
-            logging.error(f"Error processing message on {topic}: {str(e)}")
-            self.error_occurred.emit(f"Error processing message on {topic}: {str(e)}")
+            logging.error(f"Unexpected error processing message on {topic}: {str(e)}")
+            self.error_occurred.emit(f"Unexpected error on {topic}: {str(e)}")
 
 class MQTTHandler(QObject):
-    data_received = pyqtSignal(str, str, list)  # Added model_name to signal
+    data_received = pyqtSignal(str, str, list)
     connection_status = pyqtSignal(str)
     error_occurred = pyqtSignal(str)
 
-    def __init__(self, db, project_name):
+    def __init__(self, db, project_name, broker=None, port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
         self.thread = QThread()
-        self.worker = MQTTWorker(db, project_name)
+        self.worker = MQTTWorker(db, project_name, broker, port)
         self.worker.moveToThread(self.thread)
         self.running = False
 

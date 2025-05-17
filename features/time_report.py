@@ -102,15 +102,15 @@ class QRangeSlider(QWidget):
         return self.left_value, self.right_value
 
 class TimeReportFeature:
-    def __init__(self, parent, db, project_name,channel=None):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None):
         self.parent = parent
         self.db = db
         self.project_name = project_name
         self.widget = QWidget(self.parent)
         self.plot_widget = pg.GraphicsLayoutWidget()  # PyQtGraph widget
         self.file_start_time = None
-        self.channel = channel  # Accept channel parameter, even though it's not used
-
+        self.channel = channel  # Accept channel parameter
+        self.model_name = model_name  # Added to store model name
         self.file_end_time = None
         self.window_size = 1.0  # Default window size, matching TimeViewFeature
         self.data_rate = 4096.0  # Default data rate, matching TimeViewFeature
@@ -526,7 +526,6 @@ class TimeReportFeature:
                     logging.warning(f"Empty message in frame {item.get('frameIndex')} for {filename}")
                     self.parent.append_to_console(f"Warning: Empty message in frame {item.get('frameIndex')} for {filename}")
                     continue
-            
 
                 try:
                     created_at = item.get("createdAt")

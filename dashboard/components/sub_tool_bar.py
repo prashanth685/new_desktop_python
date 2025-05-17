@@ -26,7 +26,6 @@ class SubToolBar(QWidget):
         self.toolbar.clear()
         self.toolbar.setStyleSheet("""
             QToolBar { 
-                background: transparent; 
                 border: none; 
                 padding: 5px; 
                 spacing: 10px; 
@@ -35,7 +34,6 @@ class SubToolBar(QWidget):
                 border: none; 
                 padding: 8px; 
                 border-radius: 5px; 
-                background-color: #90a4ae; 
                 font-size: 24px; 
                 color: white; 
                 transition: background-color 0.3s ease; 
@@ -58,11 +56,6 @@ class SubToolBar(QWidget):
         self.toolbar.setIconSize(QSize(25, 25))
         self.toolbar.setMovable(False)
         self.toolbar.setFloatable(False)
-
-        # Add Saving File label and ComboBox
-        # filename_label = QLabel("Saving File:")
-        # filename_label.setStyleSheet("color: #212121; font-size: 16px; font-weight: bold; margin-right: 15px;")
-        # self.toolbar.addWidget(filename_label)
 
         self.filename_combo = QComboBox()
         self.filename_combo.setStyleSheet("""
@@ -130,7 +123,6 @@ class SubToolBar(QWidget):
                         border: none; 
                         padding: 8px; 
                         border-radius: 5px; 
-                        background-color: {background_color}; 
                         transition: background-color 0.3s ease; 
                     }}
                     QToolButton:hover {{ background-color: #4a90e2; }}
@@ -138,25 +130,21 @@ class SubToolBar(QWidget):
                     QToolButton:disabled {{ background-color: #546e7a; color: #b0bec5; }}
                 """)
 
-        # Add Start/Stop Saving buttons
         is_time_view = self.parent.current_feature == "Time View"
         add_action("▶", "#ffffff", self.parent.start_saving, "Start Saving Data (Time View)", is_time_view and not self.parent.is_saving, "#43a047")
-        add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "#ef5350")
+        add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "")
         self.toolbar.addSeparator()
 
-        # Add MQTT Connect/Disconnect buttons
         connect_bg = "#43a047" if self.parent.mqtt_connected else "#90a4ae"
         disconnect_bg = "#ef5350" if not self.parent.mqtt_connected else "#90a4ae"
-        add_action("🟢", "#ffffff", self.parent.connect_mqtt, "Connect to MQTT", not self.parent.mqtt_connected, connect_bg)
-        add_action("🔴", "#ffffff", self.parent.disconnect_mqtt, "Disconnect from MQTT", self.parent.mqtt_connected, disconnect_bg)
+        add_action("🔗", "#ffffff", self.parent.connect_mqtt, "Connect to MQTT", not self.parent.mqtt_connected, connect_bg)
+        add_action("❌", "#ffffff", self.parent.disconnect_mqtt, "Disconnect from MQTT", self.parent.mqtt_connected, disconnect_bg)
         self.toolbar.addSeparator()
 
-        # Add spacer to push layout icon to the right
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
 
-        # Add layout icon at the far right
         layout_action = QAction("🖼️", self)
         layout_action.setToolTip("Select Layout")
         layout_action.triggered.connect(self.show_layout_menu)
@@ -170,7 +158,6 @@ class SubToolBar(QWidget):
                     border: none; 
                     padding: 8px; 
                     border-radius: 5px; 
-                    background-color: #90a4ae; 
                     transition: background-color 0.3s ease; 
                 }
                 QToolButton:hover { background-color: #4a90e2; }
@@ -207,22 +194,18 @@ class SubToolBar(QWidget):
             }
         """)
 
-        # Add layout options
         layouts = ["1x2", "2x2", "3x3"]
         for layout in layouts:
             action = QAction(layout, self)
             action.triggered.connect(lambda checked, l=layout: self.on_layout_selected(l))
             menu.addAction(action)
 
-        # Add Ok Option
         ok_action = QAction("Ok", self)
         menu.addAction(ok_action)
 
-        # Add Cancel option
         cancel_action = QAction("Cancel", self)
         menu.addAction(cancel_action)
 
-        # Show the menu at the position of the layout icon
         layout_button = self.toolbar.widgetForAction(self.toolbar.actions()[-1])
         menu.exec_(layout_button.mapToGlobal(layout_button.rect().bottomLeft()))
 

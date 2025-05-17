@@ -4,8 +4,6 @@ from bson.objectid import ObjectId
 import logging
 import re
 
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 class Database:
     def __init__(self, connection_string="mongodb://localhost:27017/", email="user@example.com"):
         self.connection_string = connection_string
@@ -20,7 +18,6 @@ class Database:
         self.connect()
 
     def connect(self):
-        """Establish MongoDB connection and initialize collections."""
         try:
             self.client = MongoClient(self.connection_string)
             self.client.server_info()  # Test connection
@@ -36,7 +33,6 @@ class Database:
             raise
 
     def is_connected(self):
-        """Check if MongoDB connection is active."""
         if self.client is None:
             return False
         try:
@@ -46,7 +42,6 @@ class Database:
             return False
 
     def reconnect(self):
-        """Re-establish MongoDB connection if disconnected."""
         try:
             if self.client is not None:
                 self.client.close()
@@ -57,7 +52,6 @@ class Database:
             raise
 
     def _create_timeview_indexes(self):
-        """Create indexes for timeview_messages collection."""
         try:
             self.timeview_collection.create_index([("topic", ASCENDING)])
             self.timeview_collection.create_index([("filename", ASCENDING)])
@@ -68,7 +62,6 @@ class Database:
             logging.error(f"Failed to create indexes for timeview_messages: {str(e)}")
 
     def close_connection(self):
-        """Close MongoDB connection."""
         if self.client:
             try:
                 self.client.close()
@@ -83,7 +76,6 @@ class Database:
                 logging.error(f"Error closing MongoDB connection: {str(e)}")
 
     def load_projects(self):
-        """Load project names for the user."""
         self.projects = []
         try:
             for project in self.user_collection.find({"email": self.email}):
@@ -97,7 +89,6 @@ class Database:
             return []
 
     def create_project(self, project_name, models):
-        """Create a new project with models and channels."""
         if not project_name:
             return False, "Project name cannot be empty!"
         if self.user_collection.find_one({"project_name": project_name, "email": self.email}):
@@ -106,7 +97,7 @@ class Database:
         project_data = {
             "email": self.email,
             "project_name": project_name,
-            "models": models,  # List of models, each with name and channels
+            "models": models,
             "created_at": datetime.datetime.now().isoformat()
         }
         try:
@@ -120,7 +111,6 @@ class Database:
             return False, f"Failed to create project: {str(e)}"
 
     def edit_project(self, old_project_name, new_project_name, models=None):
-        """Rename a project and optionally update models."""
         if new_project_name == old_project_name and models is None:
             return True, "No change made"
         if new_project_name != old_project_name and self.user_collection.find_one({"project_name": new_project_name, "email": self.email}):
@@ -156,7 +146,6 @@ class Database:
             return False, f"Failed to edit project: {str(e)}"
 
     def delete_project(self, project_name):
-        """Delete a project and its associated data."""
         try:
             self.user_collection.delete_one({"project_name": project_name, "email": self.email})
             self.tags_collection.delete_many({"project_name": project_name, "email": self.email})
@@ -171,7 +160,6 @@ class Database:
             return False, f"Failed to delete project: {str(e)}"
 
     def get_project_data(self, project_name):
-        """Retrieve data for a specific project."""
         try:
             data = self.user_collection.find_one({"project_name": project_name, "email": self.email})
             logging.debug(f"Project data for {project_name}: {data}")
@@ -181,14 +169,12 @@ class Database:
             return None
 
     def parse_tag_string(self, tag_string):
-        """Parse a tag string into a dictionary."""
         if not tag_string:
             logging.error("Tag cannot be empty!")
             return None
         return {"tag_name": tag_string}
 
     def add_tag(self, project_name, model_name, tag_data):
-        """Add a tag to a project and model."""
         if not self.get_project_data(project_name):
             return False, "Project not found!"
         tag_data["model_name"] = model_name
@@ -207,7 +193,6 @@ class Database:
             return False, f"Failed to add tag: {str(e)}"
 
     def edit_tag(self, project_name, model_name, row, new_tag_data):
-        """Edit an existing tag."""
         tags = list(self.tags_collection.find({"project_name": project_name, "model_name": model_name, "email": self.email}))
         if row >= len(tags):
             return False, "Invalid tag index!"
@@ -243,7 +228,6 @@ class Database:
             return False, f"Failed to edit tag: {str(e)}"
 
     def delete_tag(self, project_name, model_name, row):
-        """Delete a tag from a project and model."""
         tags = list(self.tags_collection.find({"project_name": project_name, "model_name": model_name, "email": self.email}))
         if row >= len(tags):
             return False, "Invalid tag index!"
@@ -261,7 +245,6 @@ class Database:
             return False, f"Failed to delete tag: {str(e)}"
 
     def update_tag_value(self, project_name, model_name, tag_name, values, timestamp=None):
-        """Receive tag values without saving to messages_collection."""
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
@@ -276,7 +259,6 @@ class Database:
         return True, "Tag values received but not saved to mqttmessage collection"
 
     def get_tag_values(self, project_name, model_name, tag_name):
-        """Retrieve tag values for a project and model."""
         try:
             messages = list(self.messages_collection.find(
                 {"project_name": project_name, "model_name": model_name, "tag_name": tag_name, "email": self.email}
@@ -298,7 +280,6 @@ class Database:
             return []
 
     def save_tag_values(self, project_name, model_name, tag_name, data):
-        """Save tag values to messages_collection."""
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
@@ -327,7 +308,6 @@ class Database:
             return False, f"Failed to save tag values: {str(e)}"
 
     def save_timeview_message(self, project_name, model_name, message_data):
-        """Save a message for the timeview feature."""
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
@@ -358,7 +338,6 @@ class Database:
             return False, f"Failed to save timeview message: {str(e)}"
 
     def get_timeview_messages(self, project_name, model_name=None, topic=None, filename=None):
-        """Retrieve timeview messages, optionally filtered by model, topic, and/or filename."""
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return []
@@ -384,7 +363,6 @@ class Database:
             return []
 
     def get_distinct_filenames(self, project_name, model_name=None):
-        """Retrieve distinct filenames for a project and optional model from timeview_collection."""
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return []
@@ -403,7 +381,6 @@ class Database:
             return []
 
     def get_models(self, project_name):
-        """Retrieve models for a project."""
         project_data = self.get_project_data(project_name)
         if not project_data:
             logging.error(f"Project {project_name} not found!")

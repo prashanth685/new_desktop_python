@@ -3,8 +3,6 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 import logging
 
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
 class TreeView(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -13,6 +11,7 @@ class TreeView(QWidget):
         self.parent_widget = parent
         self.selected_channel = None
         self.selected_channel_item = None
+        self.selected_model = None
         self.initUI()
 
     def initUI(self):
@@ -54,6 +53,7 @@ class TreeView(QWidget):
 
                 model_item = QTreeWidgetItem(project_item)
                 model_item.setText(0, f"🖥️ {models[0]['name']}")
+                logging.debug(models)
                 model_item.setData(0, Qt.UserRole, {"type": "model", "name": model_name, "project": project_name})
 
                 for channel in channels:
@@ -83,19 +83,30 @@ class TreeView(QWidget):
             if self.selected_channel_item and self.selected_channel_item != item:
                 self.selected_channel_item.setBackground(0, QColor("#1e2937"))
 
-            if data["type"] == "project" or data["type"] == "model":
+            if data["type"] == "project":
                 self.selected_channel = None
                 self.selected_channel_item = None
-                self.parent_widget.display_feature_content("Create Tags", self.project_name)
+                self.selected_model = None
+                # No feature to display when project is clicked
+            elif data["type"] == "model":
+                self.selected_channel = None
+                self.selected_channel_item = None
+                self.selected_model = data["name"]
+                # Display Time View by default when a model is selected
+                self.parent_widget.display_feature_content("Time View", self.project_name)
             elif data["type"] == "channel":
                 self.selected_channel = data["name"]
                 self.selected_channel_item = item
+                self.selected_model = data["model"]
                 item.setBackground(0, QColor("#28a745"))
                 self.parent_widget.display_feature_content("Time View", self.project_name)
-            logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}, selected channel: {self.selected_channel}")
+            logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}, selected channel: {self.selected_channel}, selected model: {self.selected_model}")
         except Exception as e:
             logging.error(f"Error handling tree item click: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error handling tree item click: {str(e)}")
 
     def get_selected_channel(self):
         return self.selected_channel
+
+    def get_selected_model(self):
+        return self.selected_model

@@ -15,16 +15,14 @@ class ToolBar(QToolBar):
         self.clear()
         self.setStyleSheet("""
             QToolBar { 
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #37474f, stop:1 #263238); 
+                background-color:#2C3E50;
                 border: none; 
                 padding: 5px; 
                 spacing: 10px; 
             }
             QToolButton { 
                 border: none; 
-                padding: 10px; 
                 border-radius: 6px; 
-                background-color: #455a64; 
                 font-size: 35px; 
                 color: #eceff1; 
                 transition: background-color 0.3s ease; 
@@ -57,7 +55,6 @@ class ToolBar(QToolBar):
                         font-size: 35px; 
                         border: none; 
                         border-radius: 6px; 
-                        background-color: #455a64; 
                         transition: background-color 0.3s ease; 
                     }}
                     QToolButton:hover {{ background-color: #4a90e2; }}
@@ -65,7 +62,6 @@ class ToolBar(QToolBar):
                 """)
 
         feature_actions = [
-            # ("Create Tags", "🏷️", "#81c784", "Access Create Tags Feature"),
             ("Time View", "⏱️", "#ffb300", "Access Time View Feature"),
             ("Tabular View", "📋", "#64b5f6", "Access Tabular View Feature"),
             ("Time Report", "📄", "#4db6ac", "Access Time Report Feature"),
