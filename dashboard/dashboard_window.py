@@ -39,8 +39,8 @@ class DashboardWindow(QWidget):
         self.open_dashboards = {}  # Track open dashboard windows by project name
         self.current_feature = None
         self.mqtt_handler = None
-        self.feature_instances = {}
-        self.sub_windows = {}
+        self.feature_instances = {}  # Key: (feature_name, model_name, channel_name), Value: feature instance
+        self.sub_windows = {}  # Key: (feature_name, model_name, channel_name), Value: subwindow
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.is_saving = False
@@ -231,7 +231,6 @@ class DashboardWindow(QWidget):
             logging.debug("ProjectStructureWidget removed from MainSection")
         self.load_project_features()
         self.setup_mqtt()
-        self.display_feature_content("Time View", self.current_project)
 
     def setup_mqtt(self):
         if not self.current_project:
@@ -326,13 +325,13 @@ class DashboardWindow(QWidget):
             self.mqtt_status.update_mqtt_status_indicator()
 
     def on_data_received(self, tag_name, model_name, values):
-        if self.current_feature and self.current_project:
-            feature_instance = self.feature_instances.get(self.current_feature)
-            if feature_instance and hasattr(feature_instance, 'on_data_received'):
+        # Notify all feature instances that match the model_name
+        for (feature_name, instance_model, instance_channel), feature_instance in self.feature_instances.items():
+            if instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
                 try:
                     feature_instance.on_data_received(tag_name, model_name, values)
                 except Exception as e:
-                    logging.error(f"Error in on_data_received for {self.current_feature}: {str(e)}")
+                    logging.error(f"Error in on_data_received for {feature_name}: {str(e)}")
 
     def on_mqtt_status(self, message):
         self.mqtt_connected = "Connected" in message
@@ -395,8 +394,6 @@ class DashboardWindow(QWidget):
                 self.sub_tool_bar.update_subtoolbar()
                 if self.current_feature:
                     self.display_feature_content(self.current_feature, self.current_project)
-                else:
-                    self.display_feature_content("Time View", self.current_project)
                 if old_project_name in self.open_dashboards:
                     self.open_dashboards[new_project_name] = self.open_dashboards.pop(old_project_name)
                 QMessageBox.information(self, "Success", message)
@@ -433,9 +430,15 @@ class DashboardWindow(QWidget):
         if self.current_feature != "Time View":
             QMessageBox.warning(self, "Error", "Saving is only available in Time View!")
             return
-        feature_instance = self.feature_instances.get("Time View")
+        # Find the Time View instance for the current model
+        selected_model = self.tree_view.get_selected_model()
+        if not selected_model:
+            QMessageBox.warning(self, "Error", "Please select a model to save data!")
+            return
+        key = ("Time View", selected_model, None)
+        feature_instance = self.feature_instances.get(key)
         if not feature_instance:
-            QMessageBox.warning(self, "Error", "Time View feature not initialized!")
+            QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
             return
         try:
             feature_instance.start_saving()
@@ -451,9 +454,14 @@ class DashboardWindow(QWidget):
         if self.current_feature != "Time View":
             QMessageBox.warning(self, "Error", "Saving is only available in Time View!")
             return
-        feature_instance = self.feature_instances.get("Time View")
+        selected_model = self.tree_view.get_selected_model()
+        if not selected_model:
+            QMessageBox.warning(self, "Error", "Please select a model to stop saving!")
+            return
+        key = ("Time View", selected_model, None)
+        feature_instance = self.feature_instances.get(key)
         if not feature_instance:
-            QMessageBox.warning(self, "Error", "Time View feature not initialized!")
+            QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
             return
         try:
             feature_instance.stop_saving()
@@ -466,111 +474,126 @@ class DashboardWindow(QWidget):
             QMessageBox.warning(self, "Error", f"Failed to stop saving: {str(e)}")
 
     def display_feature_content(self, feature_name, project_name):
-        def render_feature():
-            try:
-                self.current_project = project_name
-                self.current_feature = feature_name
-                self.is_saving = False
-                self.sub_tool_bar.setVisible(True)  # Ensure SubToolBar is visible
-                self.sub_tool_bar.update_subtoolbar()
-                logging.debug(f"Displaying feature: {feature_name} for project: {project_name}")
-
-                current_console_height = self.console.console_message_area.height()
-
-                feature_instance = self.feature_instances.get(feature_name)
-                sub_window = self.sub_windows.get(feature_name)
-
-                if feature_instance and feature_instance.project_name == project_name and sub_window:
-                    try:
-                        if sub_window.isHidden():
-                            sub_window.show()
-                        sub_window.raise_()
-                        sub_window.activateWindow()
-                        self.main_section.arrange_layout()
-                        self.console.console_message_area.setFixedHeight(current_console_height)
-                        return
-                    except RuntimeError:
-                        del self.feature_instances[feature_name]
-                        del self.sub_windows[feature_name]
-                        feature_instance = None
-                        sub_window = None
-
-                feature_classes = {
-                    "Tabular View": TabularViewFeature,
-                    "Time View": TimeViewFeature,
-                    "Time Report": TimeReportFeature,
-                    "FFT": FFTViewFeature,
-                    "Waterfall": WaterfallFeature,
-                    "Orbit": OrbitFeature,
-                    "Trend View": TrendViewFeature,
-                    "Multiple Trend View": MultiTrendFeature,
-                    "Bode Plot": BodePlotFeature,
-                    "History Plot": HistoryPlotFeature,
-                    "Report": ReportFeature
-                }
-
-                if feature_name in feature_classes:
-                    try:
-                        if not self.db.is_connected():
-                            self.db.reconnect()
-                        # Get the selected channel and model from TreeView
-                        selected_channel = self.tree_view.get_selected_channel()
-                        selected_model = self.tree_view.get_selected_model()
-
-                        # Determine which features require a model vs a channel
-                        if feature_name in ["Time View", "Time Report"]:
-                            if not selected_model:
-                                self.console.append_to_console(f"Please select a model to view {feature_name}.")
-                                return
-                            # Pass the model name to Time View and Time Report
-                            feature_instance = feature_classes[feature_name](
-                                self, self.db, project_name, channel=selected_channel, model_name=selected_model
-                            )
-                        else:
-                            if not selected_channel:
-                                self.console.append_to_console(f"Please select a channel to view {feature_name}.")
-                                return
-                            # Pass the channel to other features
-                            feature_instance = feature_classes[feature_name](
-                                self, self.db, project_name, channel=selected_channel
-                            )
-
-                        self.feature_instances[feature_name] = feature_instance
-                        widget = feature_instance.get_widget()
-                        if widget:
-                            # Use MainSection's add_subwindow method to create and manage the subwindow
-                            self.main_section.add_subwindow(
-                                widget,
-                                feature_name,
-                                channel_name=selected_channel,
-                                model_name=selected_model
-                            )
-                            # Store the subwindow in self.sub_windows
-                            sub_window = self.main_section.mdi_area.subWindowList()[-1]  # Get the last added subwindow
-                            self.sub_windows[feature_name] = sub_window
-                            sub_window.closeEvent = lambda event, fn=feature_name: self.on_subwindow_closed(event, fn)
-                            self.console.console_message_area.setFixedHeight(current_console_height)
-                        else:
-                            logging.error(f"Feature {feature_name} returned invalid widget")
-                            QMessageBox.warning(self, "Error", f"Feature {feature_name} failed to initialize")
-                    except Exception as e:
-                        logging.error(f"Failed to load feature {feature_name}: {str(e)}")
-                        QMessageBox.warning(self, "Error", f"Failed to load {feature_name}: {str(e)}")
-                else:
-                    logging.warning(f"Unknown feature: {feature_name}")
-                    QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
-            except Exception as e:
-                logging.error(f"Error displaying feature content: {str(e)}")
-                QMessageBox.warning(self, "Error", f"Error displaying feature: {str(e)}")
-            finally:
-                self.console.console_message_area.setFixedHeight(current_console_height)
-
-        QTimer.singleShot(50, render_feature)
-
-    def on_subwindow_closed(self, event, feature_name):
         try:
-            if feature_name in self.feature_instances:
-                instance = self.feature_instances[feature_name]
+            logging.debug(f"Attempting to display feature: {feature_name} for project: {project_name}")
+            self.current_project = project_name
+            self.current_feature = feature_name
+            self.is_saving = False
+            self.sub_tool_bar.setVisible(True)  # Ensure SubToolBar is visible
+            self.sub_tool_bar.update_subtoolbar()
+
+            current_console_height = self.console.console_message_area.height()
+
+            # Get the selected channel and model from TreeView
+            selected_channel = self.tree_view.get_selected_channel()
+            selected_model = self.tree_view.get_selected_model()
+
+            # Determine the key for this feature instance
+            if feature_name in ["Time View", "Time Report"]:
+                if not selected_model:
+                    self.console.append_to_console(f"Please select a model to view {feature_name}.")
+                    logging.warning(f"No model selected for {feature_name}")
+                    return
+                key = (feature_name, selected_model, None)
+                # Set the window title: model_name - feature_name
+                window_title = f"{selected_model} - {feature_name}"
+            else:
+                if not selected_channel:
+                    self.console.append_to_console(f"Please select a channel to view {feature_name}.")
+                    logging.warning(f"No channel selected for {feature_name}")
+                    return
+                if not selected_model:
+                    self.console.append_to_console(f"Please select a model to view {feature_name}.")
+                    logging.warning(f"No model selected for {feature_name}")
+                    return
+                key = (feature_name, selected_model, selected_channel)
+                # Set the window title: model_name - channel_name - feature_name
+                window_title = f"{selected_model} - {selected_channel} - {feature_name}"
+
+            # Check if this specific instance (feature + model + channel) already exists
+            feature_instance = self.feature_instances.get(key)
+            sub_window = self.sub_windows.get(key)
+
+            if feature_instance and sub_window:
+                try:
+                    if sub_window.isHidden():
+                        sub_window.show()
+                        logging.debug(f"Showing existing subwindow for {key}")
+                    sub_window.raise_()
+                    sub_window.activateWindow()
+                    self.main_section.arrange_layout()
+                    self.console.console_message_area.setFixedHeight(current_console_height)
+                    logging.debug(f"Reused existing subwindow for {key}")
+                    return
+                except RuntimeError:
+                    logging.warning(f"Subwindow for {key} is invalid, cleaning up")
+                    del self.feature_instances[key]
+                    del self.sub_windows[key]
+                    feature_instance = None
+                    sub_window = None
+
+            feature_classes = {
+                "Tabular View": TabularViewFeature,
+                "Time View": TimeViewFeature,
+                "Time Report": TimeReportFeature,
+                "FFT": FFTViewFeature,
+                "Waterfall": WaterfallFeature,
+                "Orbit": OrbitFeature,
+                "Trend View": TrendViewFeature,
+                "Multiple Trend View": MultiTrendFeature,
+                "Bode Plot": BodePlotFeature,
+                "History Plot": HistoryPlotFeature,
+                "Report": ReportFeature
+            }
+
+            if feature_name in feature_classes:
+                try:
+                    if not self.db.is_connected():
+                        self.db.reconnect()
+                    # Create new feature instance, passing the console instance
+                    feature_instance = feature_classes[feature_name](
+                        self, self.db, project_name, channel=selected_channel, 
+                        model_name=selected_model, console=self.console
+                    )
+                    self.feature_instances[key] = feature_instance
+                    widget = feature_instance.get_widget()
+                    if widget:
+                        # Display as MDI subwindow with the custom title
+                        self.main_section.add_subwindow(
+                            widget,
+                            window_title,  # Use the custom title
+                            channel_name=selected_channel,
+                            model_name=selected_model
+                        )
+                        # Store the subwindow
+                        sub_window = self.main_section.mdi_area.subWindowList()[-1]
+                        self.sub_windows[key] = sub_window
+                        sub_window.closeEvent = lambda event, k=key: self.on_subwindow_closed(event, k)
+                        sub_window.show()
+                        self.main_section.arrange_layout()
+                        logging.debug(f"Created new subwindow for {key} with title: {window_title}")
+                    else:
+                        logging.error(f"Feature {feature_name} returned invalid widget")
+                        QMessageBox.warning(self, "Error", f"Feature {feature_name} failed to initialize")
+                    self.console.console_message_area.setFixedHeight(current_console_height)
+                except Exception as e:
+                    logging.error(f"Failed to load feature {feature_name}: {str(e)}")
+                    QMessageBox.warning(self, "Error", f"Failed to load {feature_name}: {str(e)}")
+            else:
+                logging.warning(f"Unknown feature: {feature_name}")
+                QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
+        except Exception as e:
+            logging.error(f"Error displaying feature content: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Error displaying feature: {str(e)}")
+
+    def on_subwindow_closed(self, event, key):
+        try:
+            feature_name, model_name, channel_name = key
+            logging.debug(f"Closing subwindow for key: {key}")
+            
+            # Clean up feature instance
+            if key in self.feature_instances:
+                instance = self.feature_instances[key]
                 if hasattr(instance, 'cleanup'):
                     instance.cleanup()
                 widget = instance.get_widget()
@@ -578,19 +601,35 @@ class DashboardWindow(QWidget):
                     widget.hide()
                     widget.setParent(None)
                     widget.deleteLater()
-                del self.feature_instances[feature_name]
-            if feature_name in self.sub_windows:
-                del self.sub_windows[feature_name]
+                del self.feature_instances[key]
+                logging.debug(f"Cleaned up feature instance for {key}")
+            
+            # Clean up subwindow
+            if key in self.sub_windows:
+                sub_window = self.sub_windows[key]
+                sub_window.hide()
+                self.main_section.mdi_area.removeSubWindow(sub_window)
+                sub_window.setParent(None)
+                sub_window.deleteLater()
+                del self.sub_windows[key]
+                logging.debug(f"Removed subwindow from MDI area for {key}")
+            
+            # Update current feature state
             if self.current_feature == feature_name:
-                self.current_feature = None
-                self.is_saving = False
-                self.sub_tool_bar.update_subtoolbar()
+                # Only reset if no other instances of this feature are open
+                if not any(k[0] == feature_name for k in self.feature_instances.keys()):
+                    self.current_feature = None
+                    self.is_saving = False
+                    self.sub_tool_bar.update_subtoolbar()
+                    logging.debug(f"Reset current_feature as no instances of {feature_name} remain")
+            
+            # Rearrange remaining subwindows
             self.main_section.arrange_layout()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
-            logging.debug(f"Closed subwindow for feature: {feature_name}")
+            logging.debug(f"Completed cleanup for subwindow: {key}")
         except Exception as e:
-            logging.error(f"Error cleaning up sub-window for {feature_name}: {str(e)}")
+            logging.error(f"Error cleaning up subwindow for {key}: {str(e)}")
         event.accept()
 
     def save_action(self):
@@ -631,18 +670,29 @@ class DashboardWindow(QWidget):
         self.is_saving = False
         self.timer.stop()
         self.sub_tool_bar.update_subtoolbar()
-        self.display_feature_content("Time View", self.current_project)
         self.file_bar.update_file_bar()
 
     def clear_content_layout(self):
         try:
-            for feature_name in list(self.sub_windows.keys()):
-                sub_window = self.sub_windows[feature_name]
-                sub_window.close()
+            logging.debug("Starting clear_content_layout")
+            
+            # Close all subwindows in the MDI area
+            for key in list(self.sub_windows.keys()):
+                sub_window = self.sub_windows[key]
+                if sub_window:
+                    try:
+                        sub_window.close()
+                        self.main_section.mdi_area.removeSubWindow(sub_window)
+                        logging.debug(f"Closed subwindow for {key} during clear_content_layout")
+                    except Exception as e:
+                        logging.error(f"Error closing subwindow {key}: {str(e)}")
             self.sub_windows.clear()
-            for feature_name in list(self.feature_instances.keys()):
+            logging.debug("Cleared all subwindows")
+
+            # Clean up feature instances
+            for key in list(self.feature_instances.keys()):
                 try:
-                    instance = self.feature_instances[feature_name]
+                    instance = self.feature_instances[key]
                     if hasattr(instance, 'cleanup'):
                         instance.cleanup()
                     widget = instance.get_widget()
@@ -650,13 +700,16 @@ class DashboardWindow(QWidget):
                         widget.hide()
                         widget.setParent(None)
                         widget.deleteLater()
-                    del self.feature_instances[feature_name]
+                    del self.feature_instances[key]
+                    logging.debug(f"Cleaned up feature instance for {key}")
                 except Exception as e:
-                    logging.error(f"Error cleaning up feature instance {feature_name}: {str(e)}")
+                    logging.error(f"Error cleaning up feature instance {key}: {str(e)}")
+            
+            # Clear the main section
             self.main_section.clear_widget()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
-            logging.debug("Cleared MainSection content layout")
+            logging.debug("Completed clear_content_layout")
             logging.debug(f"Current widget in MainSection: {self.main_section.current_widget}")
         except Exception as e:
             logging.error(f"Error clearing content layout: {str(e)}")

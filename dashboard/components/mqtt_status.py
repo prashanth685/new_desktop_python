@@ -20,7 +20,7 @@ class MQTTStatus(QLabel):
         """)
 
     def update_mqtt_status_indicator(self):
-        status_icon = "🔴" if self.parent.mqtt_connected else "🟢"
+        status_icon = "🟢" if self.parent.mqtt_connected else "🔴"
         self.setText(f"MQTT Connection status {status_icon}")
         self.setStyleSheet("""
             QLabel {
