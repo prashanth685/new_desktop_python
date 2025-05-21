@@ -74,6 +74,9 @@ class MainSection(QWidget):
             subwindow = QMdiSubWindow()
             subwindow.setWidget(widget)
 
+            # Disable moving of the subwindow
+            subwindow.setOption(QMdiSubWindow.RubberBandMove, False)
+
             # Use the feature_name directly as the title
             subwindow.setWindowTitle(feature_name)
 
@@ -132,7 +135,8 @@ class MainSection(QWidget):
             # Ensure all subwindows are visible and not minimized
             for subwindow in subwindows:
                 subwindow.showNormal()
-                logging.debug(f"Ensured subwindow is visible: {subwindow.windowTitle()}")
+                subwindow.setOption(QMdiSubWindow.RubberBandMove, False)  # Ensure subwindows are immovable
+                logging.debug(f"Ensured subwindow is visible and fixed: {subwindow.windowTitle()}")
 
             # Parse the layout (e.g., "2x2" -> rows=2, cols=2)
             rows, cols = map(int, self.current_layout.split('x'))
@@ -144,12 +148,13 @@ class MainSection(QWidget):
             # Define a minimum size for subwindows
             MIN_SUBWINDOW_WIDTH = 300
             MIN_SUBWINDOW_HEIGHT = 200
+            GAP = 10  # 10px gap between subwindows and at starting edges
 
             # Calculate the size for each subwindow
-            subwindow_width = max(viewport_width // cols, MIN_SUBWINDOW_WIDTH)
-            subwindow_height = max(viewport_height // rows, MIN_SUBWINDOW_HEIGHT)
+            subwindow_width = max((viewport_width - (cols + 1) * GAP) // cols, MIN_SUBWINDOW_WIDTH)
+            subwindow_height = max((viewport_height - (rows + 1) * GAP) // rows, MIN_SUBWINDOW_HEIGHT)
 
-            # Arrange subwindows in the selected grid pattern
+            # Arrange subwindows in the selected grid pattern with gaps
             for idx, subwindow in enumerate(subwindows):
                 # Determine the row and column for the current subwindow
                 page = idx // (rows * cols)  # Which "page" of the grid (for scrolling)
@@ -157,9 +162,9 @@ class MainSection(QWidget):
                 row = idx_in_page // cols
                 col = idx_in_page % cols
 
-                # Calculate position for the subwindow
-                x = col * subwindow_width
-                y = (page * viewport_height) + (row * subwindow_height)
+                # Calculate position for the subwindow with gaps
+                x = GAP + col * (subwindow_width + GAP)
+                y = (page * viewport_height) + GAP + (row * (subwindow_height + GAP))
 
                 # Resize and move the subwindow
                 subwindow.setGeometry(x, y, subwindow_width, subwindow_height)
@@ -167,17 +172,18 @@ class MainSection(QWidget):
 
             # Calculate the total size needed for the MDI area
             total_pages_needed = (len(subwindows) + (rows * cols) - 1) // (rows * cols)
-            total_height = total_pages_needed * viewport_height
-            total_width = viewport_width
+            total_height = total_pages_needed * (viewport_height + GAP)
+            total_width = viewport_width + GAP * 2
 
-            # Adjust the size of the QMdiArea
+            # Adjust the size of the MDI area
             self.mdi_area.setMinimumSize(total_width, total_height)
 
             logging.info(
                 f"Arranged {len(subwindows)} MDI subwindows in a {self.current_layout} grid pattern: "
                 f"Viewport size ({viewport_width}x{viewport_height}), "
                 f"Subwindow size ({subwindow_width}x{subwindow_height}), "
-                f"Total pages needed: {total_pages_needed}"
+                f"Total pages needed: {total_pages_needed}, "
+                f"Gap: {GAP}px"
             )
         except Exception as e:
             logging.error(f"Error in arrange_layout: {str(e)}")

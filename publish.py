@@ -1,39 +1,82 @@
-import paho.mqtt.client as mqtt
-import json
-import time
 import math
+import struct
+import paho.mqtt.publish as publish
+from PyQt5.QtCore import QTimer, QObject
+from PyQt5.QtWidgets import QApplication
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def publish_data():
-    broker = "192.168.1.175"
-    port = 1883
-    topic = "sarayu"
+class MQTTPublisher(QObject):
+    def __init__(self, broker, topics):
+        super().__init__()
+        self.broker = broker
+        self.topics = topics if isinstance(topics, list) else [topics]
+        self.count = 1
 
-    client = mqtt.Client()
-    try:
-        client.connect(broker, port, 60)
-        logging.info(f"Connected to MQTT broker at {broker}:{port}")
+        self.frequency = 5
+        self.amplitude = (46537 - 16390) / 2
+        self.offset = (46537 + 16390) / 2
 
-        # Generate a simple sine wave value
-        amplitude = (46537 - 16390) / 2
-        offset = (46537 + 16390) / 2
-        frequency = 5  # Hz
+        self.sample_rate = 4096
+        self.time_per_message = 1.0
+        self.current_time = 0.0
 
-        for i in range(200):
-            t = i * 1.0  # Time in seconds (1 message per second)
-            value = offset + amplitude * math.sin(2 * math.pi * frequency * t)
-            payload = {"values": [value]}  # Single value in a list
-            client.publish(topic, json.dumps(payload), qos=1)
-            logging.info(f"Published to {topic}: {payload}")
-            time.sleep(1)  # Publish every 1 second
+        self.channel = 4
+        self.frame_index = 0
 
-    except Exception as e:
-        logging.error(f"Failed to publish: {str(e)}")
-    finally:
-        client.disconnect()
-        logging.info("Disconnected from MQTT broker")
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.publish_message)
+        self.timer.start(1000)
+        logging.debug(f"Initialized MQTTPublisher with broker: {broker}, topics: {self.topics}")
+
+    def publish_message(self):
+        samples_per_channel = self.sample_rate
+        all_channel_data = []
+
+        for i in range(samples_per_channel):
+            t = self.current_time + (i / self.sample_rate)
+            base_value = self.offset + self.amplitude * math.sin(2 * math.pi * self.frequency * t)
+            rounded_value = int(round(base_value))
+            all_channel_data.append(rounded_value)
+
+        self.current_time += self.time_per_message
+
+        temp = []
+        for i in range(samples_per_channel):
+            for ch in range(self.channel):
+                temp.append(all_channel_data[i])
+
+        assert len(temp) == 16384, f"Expected 16384 values, got {len(temp)}"
+
+        header = [
+            self.frame_index % 65535,
+            self.frame_index // 65535,
+            self.channel,
+            self.sample_rate,
+            16,
+            int(self.sample_rate / self.channel),
+            0, 0, 0, 0
+        ]
+
+        message_values = header + temp
+        logging.debug(f"Prepared message: header {header}, data length {len(temp)}, total length {len(message_values)}")
+
+        binary_message = struct.pack(f"{len(message_values)}H", *message_values)
+
+        for topic in self.topics:
+            try:
+                publish.single(topic, binary_message, hostname=self.broker, qos=1)
+                logging.info(f"[{self.count}] Published to {topic}: frame {self.frame_index} with {len(temp)} values")
+            except Exception as e:
+                logging.error(f"Failed to publish to {topic}: {str(e)}")
+
+        self.frame_index += 1
+        self.count += 1
 
 if __name__ == "__main__":
-    publish_data()
+    app = QApplication([])
+    broker = "192.168.1.179"
+    topics = ["sarayu/tag1/topic1|m/s"]
+    mqtt_publisher = MQTTPublisher(broker, topics)
+    app.exec_()

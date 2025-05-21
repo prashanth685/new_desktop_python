@@ -8,10 +8,10 @@ from datetime import datetime
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class MQTTHandler(QObject):
-    data_received = pyqtSignal(str, str, list)  # tag_name, model_name, values
+    data_received = pyqtSignal(str, str, list, int)  # tag_name, model_name, values, sample_rate
     connection_status = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.175", port=1883):
+    def __init__(self, db, project_name, broker="192.168.1.179", port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
@@ -24,14 +24,16 @@ class MQTTHandler(QObject):
 
     def parse_topic(self, topic):
         try:
-            parts = topic.split('/')
-            if len(parts) != 3:
-                logging.error(f"Invalid topic format: {topic}")
-                return None, None, None
-            project_name, model_name, tag_with_unit = parts
-            tag_name = tag_with_unit.split('|')[0]
-            logging.debug(f"Parsed topic {topic}: project_name={project_name}, model_name={model_name}, tag_name={tag_name}")
-            return project_name, model_name, tag_name
+            tag_name = topic
+            project_data = self.db.get_project_data(self.project_name)
+            model_name = None
+            if project_data and "models" in project_data:
+                for m_name, m_data in project_data["models"].items():
+                    if m_data.get("tagName") == topic:
+                        model_name = m_name
+                        break
+            logging.debug(f"Parsed topic {topic}: project_name={self.project_name}, model_name={model_name}, tag_name={tag_name}")
+            return self.project_name, model_name, tag_name
         except Exception as e:
             logging.error(f"Error parsing topic {topic}: {str(e)}")
             return None, None, None
@@ -58,7 +60,7 @@ class MQTTHandler(QObject):
             payload = msg.payload
 
             project_name, model_name, tag_name = self.parse_topic(topic)
-            if not all([project_name, model_name, tag_name]):
+            if not tag_name:
                 logging.warning(f"Failed to parse topic: {topic}")
                 return
 
@@ -66,7 +68,6 @@ class MQTTHandler(QObject):
                 logging.debug(f"Ignoring message for project {project_name}, expected {self.project_name}")
                 return
 
-            # Try to parse payload as JSON first
             try:
                 payload_str = payload.decode('utf-8')
                 data = json.loads(payload_str)
@@ -74,49 +75,61 @@ class MQTTHandler(QObject):
                 if not isinstance(values, list) or not values:
                     logging.warning(f"Invalid JSON payload format: {payload_str}")
                     return
-                logging.debug(f"Parsed JSON payload: {values}")
+                sample_rate = data.get("sample_rate", 1)
+                num_channels = len(values)
+                logging.debug(f"Parsed JSON payload: {num_channels} channels")
             except (UnicodeDecodeError, json.JSONDecodeError):
-                # If JSON parsing fails, assume it's a binary payload
-                if len(payload) != (10 + 16384) * 2:
-                    logging.warning(f"Invalid binary payload length: {len(payload)} bytes, expected {(10 + 16384) * 2}")
+                expected_length = (10 + 16384) * 2
+                if len(payload) != expected_length:
+                    logging.warning(f"Invalid binary payload length: {len(payload)} bytes, expected {expected_length}")
                     return
-                values = struct.unpack(f"{10 + 16384}H", payload)
+                values = struct.unpack(f"<{10 + 16384}H", payload)
                 header = values[:10]
                 data_values = values[10:]
-                frame_index = header[0] + (header[1] * 65535)
                 num_channels = header[2]
                 sample_rate = header[3]
-                logging.debug(f"Parsed binary header: frame_index={frame_index}, num_channels={num_channels}, sample_rate={sample_rate}")
-                values = [float(data_values[0])]  # Take the first value
+                num_samples = len(data_values) // num_channels
+                if num_samples * num_channels != len(data_values):
+                    logging.warning(f"Inconsistent data: {len(data_values)} values for {num_channels} channels")
+                    return
+                channel_data = [data_values[ch * num_samples:(ch + 1) * num_samples] for ch in range(num_channels)]
+                values = [[float(v) for v in channel_data[ch]] for ch in range(num_channels)]
+                logging.debug(f"Parsed binary payload: {num_channels} channels, {num_samples} samples/channel")
 
-            # Emit the data
-            self.data_received.emit(tag_name, model_name, values)
-            logging.debug(f"Emitted data for {tag_name}/{model_name}: {values}")
+            if model_name:
+                self.data_received.emit(tag_name, model_name, values, sample_rate)
+                logging.debug(f"Emitted data for {tag_name}/{model_name}: {len(values)} channels, sample_rate={sample_rate}")
 
-            # Save to timeview_messages
-            message_data = {
-                "topic": tag_name,
-                "filename": f"data{datetime.now().timestamp()}",
-                "frameIndex": 0,  # Simplified for JSON; binary payload already sets this
-                "message": values,
-                "numberOfChannels": 1,
-                "createdAt": datetime.now().isoformat()
-            }
-            self.db.save_timeview_message(project_name, model_name, message_data)
+                message_data = {
+                    "topic": tag_name,
+                    "filename": f"data{datetime.now().timestamp()}",
+                    "frameIndex": header[0] + (header[1] * 65535) if 'header' in locals() else 0,
+                    "message": payload,
+                    "numberOfChannels": num_channels,
+                    "samplingRate": sample_rate,
+                    "createdAt": datetime.now().isoformat(),
+                    "project_name": project_name,
+                    "model_name": model_name,
+                    "email": self.db.email
+                }
+                success, message = self.db.save_timeview_message(project_name, model_name, message_data)
+                if success:
+                    logging.debug(f"Saved timeview message for {tag_name}/{model_name}")
+                else:
+                    logging.error(f"Failed to save timeview message: {message}")
 
         except Exception as e:
             logging.error(f"Error processing MQTT message: {str(e)}")
 
     def subscribe_to_topics(self):
         try:
-            tags = self.db.tags_collection.find({"project_name": self.project_name})
-            for tag in tags:
-                model_name = tag.get("model_name", "default_model")
-                tag_name = tag["tag_name"]
-                topic = f"{self.project_name}/{model_name}/{tag_name}|m/s"
-                self.client.subscribe(topic)
-                self.subscribed_topics.append(topic)
-                logging.info(f"Subscribed to topic: {topic}")
+            project_data = self.db.get_project_data(self.project_name)
+            for model_name, model_data in project_data.get("models", {}).items():
+                tag_name = model_data.get("tagName", "")
+                if tag_name:
+                    self.client.subscribe(tag_name)
+                    self.subscribed_topics.append(tag_name)
+                    logging.info(f"Subscribed to topic: {tag_name}")
         except Exception as e:
             logging.error(f"Error subscribing to topics: {str(e)}")
 

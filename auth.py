@@ -16,7 +16,7 @@ class AuthWindow(QWidget):
         super().__init__()
         self.client = None
         self.db = None
-        self.users_collection = None
+        self.user_collection = None
         self.is_login_mode = True
         self.initDB()
         self.initUI()
@@ -25,8 +25,8 @@ class AuthWindow(QWidget):
     def initDB(self):
         try:
             self.client = MongoClient("mongodb://localhost:27017/")
-            self.db = self.client["sarayu_db"]
-            self.users_collection = self.db["users"]
+            self.db = self.client["changed_db"]
+            self.user_collection = self.db["users"]
             print("Connected to MongoDB successfully!")
         except ConnectionFailure as e:
             print(f"Could not connect to MongoDB: {e}")
@@ -265,7 +265,7 @@ class AuthWindow(QWidget):
             QMessageBox.warning(self, "Input Error", "Please enter both email and password.")
             return
 
-        user = self.users_collection.find_one({"email": email})
+        user = self.user_collection.find_one({"email": email})
         if user and bcrypt.checkpw(password.encode('utf-8'), user["password"]):
             try:
                 db = Database(connection_string="mongodb://localhost:27017/", email=email)
@@ -291,14 +291,14 @@ class AuthWindow(QWidget):
             QMessageBox.warning(self, "Input Error", "Passwords do not match.")
             return
 
-        if self.users_collection.find_one({"email": email}):
+        if self.user_collection.find_one({"email": email}):
             QMessageBox.warning(self, "Signup Failed", "User with this email already exists. Please log in.")
             return
 
         hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
         user_data = {"email": email, "password": hashed_password}
         try:
-            self.users_collection.insert_one(user_data)
+            self.user_collection.insert_one(user_data)
             QMessageBox.information(self, "Success", "Signup successful! Proceeding to project selection.")
             db = Database(connection_string="mongodb://localhost:27017/", email=email)
             self.project_selection = ProjectSelectionWindow(db, email, self)

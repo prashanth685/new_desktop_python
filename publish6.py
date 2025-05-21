@@ -44,12 +44,12 @@ class MQTTPublisher(QObject):
             self.current_time += self.time_per_message
 
             # Interleave channel data: CH0_0, CH1_0, CH2_0, CH3_0, CH0_1, ...
-            interleaved = []
+            temp = []
             for i in range(samples_per_channel):
                 for ch in range(self.channel):
-                    interleaved.append(all_channel_data[i])  # same value for now
+                    temp.append(all_channel_data[i])  # same value for now
 
-            assert len(interleaved) == 16384, f"Expected 16384 values, got {len(interleaved)}"
+            assert len(temp) == 16384, f"Expected 16384 values, got {len(temp)}"
 
             # Create header
             header = [
@@ -62,7 +62,7 @@ class MQTTPublisher(QObject):
                 0, 0, 0, 0  # Placeholder slots
             ]
 
-            message_values = header + interleaved
+            message_values = header + temp
 
             # Pack into binary
             binary_message = struct.pack(f"{len(message_values)}H", *message_values)
@@ -71,7 +71,7 @@ class MQTTPublisher(QObject):
             for topic in self.topics:
                 try:
                     publish.single(topic, binary_message, hostname=self.broker, qos=1)
-                    logging.info(f"[{self.count}] Published to {topic}: frame {self.frame_index} with {len(interleaved)} values")
+                    logging.info(f"[{self.count}] Published to {topic}: frame {self.frame_index} with {len(temp)} values")
                 except Exception as e:
                     logging.error(f"Failed to publish to {topic}: {str(e)}")
 

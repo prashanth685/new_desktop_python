@@ -36,11 +36,11 @@ class DashboardWindow(QWidget):
         self.email = email
         self.auth_window = auth_window
         self.current_project = None
-        self.open_dashboards = {}  # Track open dashboard windows by project name
+        self.open_dashboards = {}
         self.current_feature = None
         self.mqtt_handler = None
-        self.feature_instances = {}  # Key: (feature_name, model_name, channel_name), Value: feature instance
-        self.sub_windows = {}  # Key: (feature_name, model_name, channel_name), Value: subwindow
+        self.feature_instances = {}
+        self.sub_windows = {}
         self.timer = QTimer(self)
         self.timer.setSingleShot(True)
         self.is_saving = False
@@ -136,7 +136,7 @@ class DashboardWindow(QWidget):
         central_layout.addWidget(self.main_splitter)
 
         self.tree_view = TreeView(self)
-        self.tree_view.setVisible(False)  # Hide initially
+        self.tree_view.setVisible(False)
         self.main_splitter.addWidget(self.tree_view)
 
         right_container = QWidget()
@@ -147,32 +147,44 @@ class DashboardWindow(QWidget):
         right_container.setLayout(right_layout)
 
         self.sub_tool_bar = SubToolBar(self)
-        self.sub_tool_bar.setVisible(False)  # Hide initially
+        self.sub_tool_bar.setVisible(False)
         right_layout.addWidget(self.sub_tool_bar)
 
         self.main_section = MainSection(self)
         right_layout.addWidget(self.main_section, 1)
 
         self.main_splitter.addWidget(right_container)
-        # Set splitter sizes: 15% for TreeView, 85% for right_container
-        window_width = self.width() if self.width() > 0 else 1200  # Default width if not yet sized
+        window_width = self.width() if self.width() > 0 else 1200
         tree_view_width = int(window_width * 0.15)
         right_container_width = int(window_width * 0.85)
         self.main_splitter.setSizes([tree_view_width, right_container_width])
 
+        # self.console = Console(self)
+        # self.mqtt_status = MQTTStatus(self)
+        # self.console_layout = QVBoxLayout()
+        # self.console_layout.setContentsMargins(0,0,0,0)
+        # console_container = QWidget()
+        # console_container.setStyleSheet("background-color: white;")
+        # console_container.setFixedHeight(300)
+        # console_container.setLayout(self.console_layout)
+        # self.console_layout.addWidget(self.console.console_message_area)
+        # self.console_layout.addWidget(self.console.button_container)
+        # self.console_layout.addWidget(self.mqtt_status)
+        # main_layout.addWidget(console_container)
+
         self.console = Console(self)
         self.mqtt_status = MQTTStatus(self)
         self.console_layout = QVBoxLayout()
-        self.console_layout.setContentsMargins(5, 5, 5, 5)
-        self.console_layout.setSpacing(5)
-        console_container = QWidget()
-        console_container.setStyleSheet("background-color: #1e2937; border-top: 1px solid #2c3e50;")
-        console_container.setFixedHeight(150)  # Fixed height for console area
-        console_container.setLayout(self.console_layout)
-        self.console_layout.addWidget(self.console.button_container)
-        self.console_layout.addWidget(self.console.console_message_area)
-        self.console_layout.addWidget(self.mqtt_status)
-        main_layout.addWidget(console_container)
+        self.console_layout.setContentsMargins(0, 0, 0, 0)
+        self.console_layout.setSpacing(0)
+        self.console_container = QWidget()  # Already correctly named as console_container
+        self.console_container.setStyleSheet("background-color: #263238;")
+        self.console_container.setFixedHeight(80)  # Initial height (minimized state: 20px + 40px)
+        self.console_container.setLayout(self.console_layout)
+        self.console_layout.addWidget(self.console.button_container)  # Button container at top
+        self.console_layout.addWidget(self.console.console_message_area)  # Message area (initially hidden)
+        self.console_layout.addWidget(self.mqtt_status)  # MQTT status at bottom
+        main_layout.addWidget(self.console_container)
 
     def deferred_initialization(self):
         projects = self.db.load_projects()
@@ -184,7 +196,7 @@ class DashboardWindow(QWidget):
     def display_select_project(self):
         self.clear_content_layout()
         self.tree_view.setVisible(False)
-        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.sub_tool_bar.setVisible(False)
         self.current_project = None
         self.setWindowTitle('Sarayu Desktop Application')
         self.select_project_widget = SelectProjectWidget(self)
@@ -193,29 +205,26 @@ class DashboardWindow(QWidget):
 
     def display_create_project(self):
         self.clear_content_layout()
-        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.sub_tool_bar.setVisible(False)
         self.create_project_widget = CreateProjectWidget(self)
         self.main_section.set_widget(self.create_project_widget)
         logging.debug("Displayed CreateProjectWidget in MainSection")
 
     def display_project_structure(self):
         self.clear_content_layout()
-        self.tree_view.setVisible(False)  # Hide TreeView
-        self.sub_tool_bar.setVisible(False)  # Hide SubToolBar
+        self.tree_view.setVisible(False)
+        self.sub_tool_bar.setVisible(False)
         self.project_structure_widget = ProjectStructureWidget(self)
-        # Connect the project_selected signal to load_project
         self.project_structure_widget.project_selected.connect(self.load_project)
         self.main_section.set_widget(self.project_structure_widget)
-        # Adjust splitter to give full width to right_container
-        self.main_splitter.setSizes([0, 1200])  # 0 for TreeView, full width for MainSection
+        self.main_splitter.setSizes([0, 1200])
         logging.debug("Displayed ProjectStructureWidget in MainSection")
 
     def load_project(self, project_name):
         self.current_project = project_name
         self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
         self.tree_view.setVisible(True)
-        self.sub_tool_bar.setVisible(True)  # Show SubToolBar
-        # Reset splitter sizes to 15%/85%
+        self.sub_tool_bar.setVisible(True)
         window_width = self.width() if self.width() > 0 else 1200
         tree_view_width = int(window_width * 0.15)
         right_container_width = int(window_width * 0.85)
@@ -223,7 +232,6 @@ class DashboardWindow(QWidget):
         logging.debug(f"TreeView visibility: {self.tree_view.isVisible()}")
         logging.debug(f"SubToolBar visibility: {self.sub_tool_bar.isVisible()}")
         logging.debug(f"Loading project: {project_name}")
-        # Explicitly clear ProjectStructureWidget
         self.clear_content_layout()
         if self.project_structure_widget:
             self.project_structure_widget.setParent(None)
@@ -275,8 +283,17 @@ class DashboardWindow(QWidget):
         try:
             if not self.db.is_connected():
                 self.db.reconnect()
-            tags = list(self.db.tags_collection.find({"project_name": self.current_project}))
-            return [{"tag_name": tag["tag_name"], "model_name": tag.get("model_name", "default_model")} for tag in tags]
+            project_data = self.db.get_project_data(self.current_project)
+            if not project_data or "models" not in project_data:
+                logging.warning(f"No models found for project: {self.current_project}")
+                return []
+            tags = []
+            for model_name, model_data in project_data["models"].items():
+                tag_name = model_data.get("tagName", "")
+                if tag_name:
+                    tags.append({"tag_name": tag_name, "model_name": model_name})
+            logging.debug(f"Retrieved tags for project {self.current_project}: {tags}")
+            return tags
         except Exception as e:
             logging.error(f"Failed to retrieve project tags: {str(e)}")
             return []
@@ -325,7 +342,6 @@ class DashboardWindow(QWidget):
             self.mqtt_status.update_mqtt_status_indicator()
 
     def on_data_received(self, tag_name, model_name, values):
-        # Notify all feature instances that match the model_name
         for (feature_name, instance_model, instance_channel), feature_instance in self.feature_instances.items():
             if instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
                 try:
@@ -430,7 +446,6 @@ class DashboardWindow(QWidget):
         if self.current_feature != "Time View":
             QMessageBox.warning(self, "Error", "Saving is only available in Time View!")
             return
-        # Find the Time View instance for the current model
         selected_model = self.tree_view.get_selected_model()
         if not selected_model:
             QMessageBox.warning(self, "Error", "Please select a model to save data!")
@@ -479,23 +494,20 @@ class DashboardWindow(QWidget):
             self.current_project = project_name
             self.current_feature = feature_name
             self.is_saving = False
-            self.sub_tool_bar.setVisible(True)  # Ensure SubToolBar is visible
+            self.sub_tool_bar.setVisible(True)
             self.sub_tool_bar.update_subtoolbar()
 
             current_console_height = self.console.console_message_area.height()
 
-            # Get the selected channel and model from TreeView
             selected_channel = self.tree_view.get_selected_channel()
             selected_model = self.tree_view.get_selected_model()
 
-            # Determine the key for this feature instance
             if feature_name in ["Time View", "Time Report"]:
                 if not selected_model:
                     self.console.append_to_console(f"Please select a model to view {feature_name}.")
                     logging.warning(f"No model selected for {feature_name}")
                     return
                 key = (feature_name, selected_model, None)
-                # Set the window title: model_name - feature_name
                 window_title = f"{selected_model} - {feature_name}"
             else:
                 if not selected_channel:
@@ -507,10 +519,8 @@ class DashboardWindow(QWidget):
                     logging.warning(f"No model selected for {feature_name}")
                     return
                 key = (feature_name, selected_model, selected_channel)
-                # Set the window title: model_name - channel_name - feature_name
                 window_title = f"{selected_model} - {selected_channel} - {feature_name}"
 
-            # Check if this specific instance (feature + model + channel) already exists
             feature_instance = self.feature_instances.get(key)
             sub_window = self.sub_windows.get(key)
 
@@ -550,7 +560,6 @@ class DashboardWindow(QWidget):
                 try:
                     if not self.db.is_connected():
                         self.db.reconnect()
-                    # Create new feature instance, passing the console instance
                     feature_instance = feature_classes[feature_name](
                         self, self.db, project_name, channel=selected_channel, 
                         model_name=selected_model, console=self.console
@@ -558,14 +567,12 @@ class DashboardWindow(QWidget):
                     self.feature_instances[key] = feature_instance
                     widget = feature_instance.get_widget()
                     if widget:
-                        # Display as MDI subwindow with the custom title
                         self.main_section.add_subwindow(
                             widget,
-                            window_title,  # Use the custom title
+                            window_title,
                             channel_name=selected_channel,
                             model_name=selected_model
                         )
-                        # Store the subwindow
                         sub_window = self.main_section.mdi_area.subWindowList()[-1]
                         self.sub_windows[key] = sub_window
                         sub_window.closeEvent = lambda event, k=key: self.on_subwindow_closed(event, k)
@@ -591,7 +598,6 @@ class DashboardWindow(QWidget):
             feature_name, model_name, channel_name = key
             logging.debug(f"Closing subwindow for key: {key}")
             
-            # Clean up feature instance
             if key in self.feature_instances:
                 instance = self.feature_instances[key]
                 if hasattr(instance, 'cleanup'):
@@ -604,7 +610,6 @@ class DashboardWindow(QWidget):
                 del self.feature_instances[key]
                 logging.debug(f"Cleaned up feature instance for {key}")
             
-            # Clean up subwindow
             if key in self.sub_windows:
                 sub_window = self.sub_windows[key]
                 sub_window.hide()
@@ -614,16 +619,13 @@ class DashboardWindow(QWidget):
                 del self.sub_windows[key]
                 logging.debug(f"Removed subwindow from MDI area for {key}")
             
-            # Update current feature state
             if self.current_feature == feature_name:
-                # Only reset if no other instances of this feature are open
                 if not any(k[0] == feature_name for k in self.feature_instances.keys()):
                     self.current_feature = None
                     self.is_saving = False
                     self.sub_tool_bar.update_subtoolbar()
                     logging.debug(f"Reset current_feature as no instances of {feature_name} remain")
             
-            # Rearrange remaining subwindows
             self.main_section.arrange_layout()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
@@ -676,7 +678,6 @@ class DashboardWindow(QWidget):
         try:
             logging.debug("Starting clear_content_layout")
             
-            # Close all subwindows in the MDI area
             for key in list(self.sub_windows.keys()):
                 sub_window = self.sub_windows[key]
                 if sub_window:
@@ -689,7 +690,6 @@ class DashboardWindow(QWidget):
             self.sub_windows.clear()
             logging.debug("Cleared all subwindows")
 
-            # Clean up feature instances
             for key in list(self.feature_instances.keys()):
                 try:
                     instance = self.feature_instances[key]
@@ -705,7 +705,6 @@ class DashboardWindow(QWidget):
                 except Exception as e:
                     logging.error(f"Error cleaning up feature instance {key}: {str(e)}")
             
-            # Clear the main section
             self.main_section.clear_widget()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
@@ -746,7 +745,6 @@ class DashboardWindow(QWidget):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Adjust splitter sizes on resize to maintain 15%/85% ratio when TreeView is visible
         if self.tree_view.isVisible():
             window_width = self.width()
             tree_view_width = int(window_width * 0.15)

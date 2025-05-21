@@ -38,32 +38,32 @@ class TreeView(QWidget):
         project_item.setData(0, Qt.UserRole, {"type": "project", "name": project_name})
 
         try:
-            models = self.db.get_models(project_name)
-            if not models:
+            # Fetch full project data to get models and their metadata
+            project_data = self.db.get_project_data(project_name)
+            if not project_data or "models" not in project_data:
                 logging.warning(f"No models found for project: {project_name}")
                 return
 
-            for model in models:
-                if isinstance(model, dict):
-                    model_name = model.get("model_name", "Unknown Model")
-                    channels = model.get("channels", [])
-                else:
-                    model_name = str(model)
-                    channels = []
+            models = project_data.get("models", {})
+            if not models:
+                logging.warning(f"Empty models dictionary for project: {project_name}")
+                return
 
+            for model_name, model_data in models.items():
+                # Use model_name as the key and extract metadata
                 model_item = QTreeWidgetItem(project_item)
-                model_item.setText(0, f"🖥️ {models[0]['name']}")
-                logging.debug(models)
-                model_item.setData(0, Qt.UserRole, {"type": "model", "name": model_name, "project": project_name})
+                model_item.setText(0, f"🖥️ {model_name}")
+                model_item.setData(0, Qt.UserRole, {
+                    "type": "model",
+                    "name": model_name,
+                    "project": project_name
+                })
 
+                # Add channels from model_data
+                channels = model_data.get("channels", [])
                 for channel in channels:
-                    if isinstance(channel, dict):
-                        channel_name = channel.get("channel_name", f"Channel_{len(channels)+1}")
-                        tag_name = channel.get("tag_name", channel_name)
-                    else:
-                        channel_name = str(channel)
-                        tag_name = channel_name
-
+                    channel_name = channel.get("channel_name", f"Channel_{len(channels)+1}")
+                    tag_name = channel.get("tag_name", channel_name)
                     channel_item = QTreeWidgetItem(model_item)
                     channel_item.setText(0, f"📡 {channel_name}")
                     channel_item.setData(0, Qt.UserRole, {
@@ -73,6 +73,7 @@ class TreeView(QWidget):
                         "model": model_name,
                         "project": project_name
                     })
+
         except Exception as e:
             logging.error(f"Error adding project to tree: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error adding project to tree: {str(e)}")

@@ -1,8 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QPushButton, QLabel, QGraphicsDropShadowEffect
 from PyQt5.QtCore import Qt
-import logging
-
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+from PyQt5.QtGui import QColor, QFont
 
 class SelectProjectWidget(QWidget):
     def __init__(self, parent=None):
@@ -11,96 +9,73 @@ class SelectProjectWidget(QWidget):
         self.initUI()
 
     def initUI(self):
-        self.setStyleSheet("background-color: #f5f7fa;")
+        # Main background
+        self.setStyleSheet("background-color: #f8f9fa;")  # Soft gray like React dashboards
 
+        # Main layout
         layout = QVBoxLayout()
         layout.setAlignment(Qt.AlignCenter)
-        layout.setSpacing(20)
-        layout.setContentsMargins(40, 40, 40, 40)
+        layout.setSpacing(0)
+        layout.setContentsMargins(0, 0, 0, 0)
         self.setLayout(layout)
 
+        # Card container
         card_widget = QWidget()
+        card_widget.setFixedSize(500, 500)
         card_widget.setStyleSheet("""
             QWidget {
-                background-color: white;
-                border-radius: 15px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-                padding: 30px;
+                background-color: #ffffff;
+                border-radius: 16px;
             }
         """)
-        card_layout = QVBoxLayout()
-        card_layout.setSpacing(20)
-        card_widget.setLayout(card_layout)
-        layout.addWidget(card_widget)
 
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(25)
+        shadow.setXOffset(0)
+        shadow.setYOffset(8)
+        shadow.setColor(QColor(0, 0, 0, 30))  # Light shadow
+        card_widget.setGraphicsEffect(shadow)
+
+        # Card layout
+        card_layout = QVBoxLayout()
+        card_layout.setContentsMargins(40, 40, 40, 40)
+        card_layout.setSpacing(30)
+        card_widget.setLayout(card_layout)
+        layout.addWidget(card_widget, alignment=Qt.AlignCenter)
+
+        # Title
         title_label = QLabel("Select an option")
-        title_label.setStyleSheet("""
-            font-size: 28px;
-            font-weight: bold;
-            color: #343a40;
-            margin-bottom: 20px;
-        """)
+        title_label.setFont(QFont("Segoe UI", 20, QFont.Bold))
+        title_label.setStyleSheet("color: #212529;")
         card_layout.addWidget(title_label, alignment=Qt.AlignCenter)
 
-        create_button = QPushButton("Create New Project")
-        create_button.setStyleSheet("""
+        # Button style
+        button_style = """
             QPushButton {
-                background-color: #007bff;
+                background-color: #0d6efd;
                 color: white;
+                border: none;
                 border-radius: 8px;
-                padding: 12px;
+                padding: 14px 20px;
                 font-size: 16px;
-                font-weight: bold;
-                min-width: 200px;
+                font-weight: 600;
             }
             QPushButton:hover {
-                background-color: #0056b3;
+                background-color: #0b5ed7;
             }
             QPushButton:pressed {
-                background-color: #004085;
+                background-color: #0a58ca;
             }
-        """)
+        """
+
+        # Create Project Button
+        create_button = QPushButton("➕  Create New Project")
+        create_button.setStyleSheet(button_style)
         create_button.clicked.connect(self.parent.create_project)
         card_layout.addWidget(create_button, alignment=Qt.AlignCenter)
 
-        open_button = QPushButton("Open Existing Project")
-        open_button.setStyleSheet("""
-            QPushButton {
-                background-color: #28a745;
-                color: white;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
-                font-weight: bold;
-                min-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:pressed {
-                background-color: #1e7e34;
-            }
-        """)
+        # Open Existing Project Button (green)
+        open_button = QPushButton("📂  Open Existing Project")
+        open_button.setStyleSheet(button_style.replace("#0d6efd", "#198754").replace("#0b5ed7", "#157347").replace("#0a58ca", "#146c43"))
         open_button.clicked.connect(self.parent.display_project_structure)
         card_layout.addWidget(open_button, alignment=Qt.AlignCenter)
-
-        # logout_button = QPushButton("Logout")
-        # logout_button.setStyleSheet("""
-        #     QPushButton {
-        #         background-color: #dc3545;
-        #         color: white;
-        #         border-radius: 8px;
-        #         padding: 12px;
-        #         font-size: 16px;
-        #         font-weight: bold;
-        #         min-width: 200px;
-        #     }
-        #     QPushButton:hover {
-        #         background-color: #c82333;
-        #     }
-        #     QPushButton:pressed {
-        #         background-color: #bd2130;
-        #     }
-        # """)
-        # logout_button.clicked.connect(self.parent.back_to_login)
-        # card_layout.addWidget(logout_button, alignment=Qt.AlignCenter)

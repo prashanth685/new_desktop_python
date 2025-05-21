@@ -6,9 +6,15 @@ class Console(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.initUI()
+        self.minimize_console()  # Set initial state to minimized
 
     def initUI(self):
         self.button_container = QWidget()
+        self.button_container.setStyleSheet("""
+    QWidget {
+        background-color: black;
+    }
+""")
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(5, 0, 5, 0)
         button_layout.setSpacing(5)
@@ -71,7 +77,7 @@ class Console(QWidget):
 
         self.console_message_area = QTextEdit()
         self.console_message_area.setReadOnly(True)
-        self.console_message_area.setFixedHeight(0)
+        self.console_message_area.setFixedHeight(280)
         self.console_message_area.setStyleSheet("""
             QTextEdit { 
                 background-color: #212121; 
@@ -111,13 +117,15 @@ class Console(QWidget):
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
 
-            logging.info("Console minimized to 50px")
+            # Update container height to minimized state
+            self.parent.console_container.setFixedHeight(60)  # 20 (button) + 40 (MQTT)
+            logging.info("Console minimized")
         except Exception as e:
             logging.error(f"Error minimizing console: {str(e)}")
 
     def maximize_console(self):
         try:
-            self.console_message_area.setFixedHeight(100)
+            self.console_message_area.setFixedHeight(200)
             self.console_message_area.show()
 
             layout = self.parent.console_layout
@@ -129,6 +137,8 @@ class Console(QWidget):
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
 
-            logging.info("Console maximized to 100px")
+            # Update container height to fit the expanded console
+            self.parent.console_container.setFixedHeight(260)  # 200 (console) + 20 + 40
+            logging.info("Console maximized")
         except Exception as e:
             logging.error(f"Error maximizing console: {str(e)}")

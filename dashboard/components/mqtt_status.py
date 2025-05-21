@@ -8,9 +8,11 @@ class MQTTStatus(QLabel):
 
     def initUI(self):
         self.setToolTip("MQTT Connection Status")
+        self.setFixedHeight(40)  # Set height to 40px
+
         self.setStyleSheet("""
             QLabel {
-                background-color: black;
+                background-color: #2C3E50;
                 color: #FFFFFF;
                 font-size: 14px;
                 font:bold;
@@ -28,7 +30,6 @@ class MQTTStatus(QLabel):
                 color: #FFFFFF;
                 font-size: 14px;
                 font:bold;
-                padding: 2px 8px;
                 border-radius: 0px;
             }
         """)
