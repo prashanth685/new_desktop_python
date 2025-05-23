@@ -200,12 +200,6 @@ class SubToolBar(QWidget):
             action.triggered.connect(lambda checked, l=layout: self.on_layout_selected(l))
             menu.addAction(action)
 
-        # ok_action = QAction("Ok", self)
-        # menu.addAction(ok_action)
-
-        # cancel_action = QAction("Cancel", self)
-        # menu.addAction(cancel_action)
-
         layout_button = self.toolbar.widgetForAction(self.toolbar.actions()[-1])
         menu.exec_(layout_button.mapToGlobal(layout_button.rect().bottomLeft()))
 

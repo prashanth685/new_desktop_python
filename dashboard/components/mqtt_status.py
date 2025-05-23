@@ -12,7 +12,7 @@ class MQTTStatus(QLabel):
 
         self.setStyleSheet("""
             QLabel {
-                background-color: #2C3E50;
+                background-color: black;
                 color: #FFFFFF;
                 font-size: 14px;
                 font:bold;

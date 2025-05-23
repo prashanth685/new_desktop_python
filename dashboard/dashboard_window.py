@@ -159,27 +159,14 @@ class DashboardWindow(QWidget):
         right_container_width = int(window_width * 0.85)
         self.main_splitter.setSizes([tree_view_width, right_container_width])
 
-        # self.console = Console(self)
-        # self.mqtt_status = MQTTStatus(self)
-        # self.console_layout = QVBoxLayout()
-        # self.console_layout.setContentsMargins(0,0,0,0)
-        # console_container = QWidget()
-        # console_container.setStyleSheet("background-color: white;")
-        # console_container.setFixedHeight(300)
-        # console_container.setLayout(self.console_layout)
-        # self.console_layout.addWidget(self.console.console_message_area)
-        # self.console_layout.addWidget(self.console.button_container)
-        # self.console_layout.addWidget(self.mqtt_status)
-        # main_layout.addWidget(console_container)
-
         self.console = Console(self)
         self.mqtt_status = MQTTStatus(self)
         self.console_layout = QVBoxLayout()
         self.console_layout.setContentsMargins(0, 0, 0, 0)
         self.console_layout.setSpacing(0)
-        self.console_container = QWidget()  # Already correctly named as console_container
-        self.console_container.setStyleSheet("background-color: #263238;")
-        self.console_container.setFixedHeight(80)  # Initial height (minimized state: 20px + 40px)
+        self.console_container = QWidget()  # console_container
+        self.console_container.setStyleSheet("background-color: black;")
+        self.console_container.setFixedHeight(80)  # Initial height (minimized state: 40px + 40px)
         self.console_container.setLayout(self.console_layout)
         self.console_layout.addWidget(self.console.button_container)  # Button container at top
         self.console_layout.addWidget(self.console.console_message_area)  # Message area (initially hidden)

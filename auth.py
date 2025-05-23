@@ -269,8 +269,8 @@ class AuthWindow(QWidget):
         if user and bcrypt.checkpw(password.encode('utf-8'), user["password"]):
             try:
                 db = Database(connection_string="mongodb://localhost:27017/", email=email)
-                self.project_selection = ProjectSelectionWindow(db, email, self)
-                self.project_selection.show()
+                ProjectSelectionWindow(db, email, self)
+
                 self.hide()
             except Exception as e:
                 print(f"Error opening Project Selection: {e}")
@@ -301,8 +301,8 @@ class AuthWindow(QWidget):
             self.user_collection.insert_one(user_data)
             QMessageBox.information(self, "Success", "Signup successful! Proceeding to project selection.")
             db = Database(connection_string="mongodb://localhost:27017/", email=email)
-            self.project_selection = ProjectSelectionWindow(db, email, self)
-            self.project_selection.show()
+            ProjectSelectionWindow(db, email, self)
+
             self.hide()
         except Exception as e:
             print(f"Error inserting user: {e}")

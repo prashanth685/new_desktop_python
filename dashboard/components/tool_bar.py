@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QToolBar, QAction, QWidget, QSizePolicy
+from PyQt5.QtWidgets import QToolBar, QAction, QWidget, QSizePolicy, QMessageBox
 from PyQt5.QtCore import QSize
 
 class ToolBar(QToolBar):
@@ -44,7 +44,7 @@ class ToolBar(QToolBar):
 
         def add_action(feature_name, text_icon, color, tooltip):
             action = QAction(text_icon, self)
-            action.triggered.connect(lambda: self.parent.display_feature_content(feature_name, self.parent.current_project))
+            action.triggered.connect(lambda: self.validate_and_display(feature_name))
             action.setToolTip(tooltip)
             self.addAction(action)
             button = self.widgetForAction(action)
@@ -81,3 +81,11 @@ class ToolBar(QToolBar):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
+
+    def validate_and_display(self, feature_name):
+        # Check if a model is selected
+        if not self.parent.tree_view.get_selected_model():
+            QMessageBox.warning(self, "Selection Required", "Please select a model from the tree view first.")
+            return
+        # If validation passes, proceed to display the feature
+        self.parent.display_feature_content(feature_name, self.parent.current_project)

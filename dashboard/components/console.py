@@ -10,11 +10,12 @@ class Console(QWidget):
 
     def initUI(self):
         self.button_container = QWidget()
+        self.button_container.setFixedHeight(40)
         self.button_container.setStyleSheet("""
-    QWidget {
-        background-color: black;
-    }
-""")
+            QWidget {
+                background-color: #0c0c0f;
+            }
+        """)
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(5, 0, 5, 0)
         button_layout.setSpacing(5)
@@ -24,27 +25,27 @@ class Console(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         button_layout.addWidget(spacer)
 
-        clear_button = QPushButton("Clear")
-        clear_button.setToolTip("Clear Console Output")
-        clear_button.clicked.connect(self.clear_console)
-        clear_button.setStyleSheet("""
-            QPushButton { 
-                color: white; 
-                font-size: 14px; 
-                padding: 2px 8px; 
-                border-radius: 4px; 
-                background-color: #d32f2f; 
-                border: none;
-            }
-            QPushButton:hover { background-color: #ef5350; }
-            QPushButton:pressed { background-color: #b71c1c; }
-        """)
-        button_layout.addWidget(clear_button)
+        # clear_button = QPushButton("Clear")
+        # clear_button.setToolTip("Clear Console Output")
+        # clear_button.clicked.connect(self.clear_console)
+        # clear_button.setStyleSheet("""
+        #     QPushButton { 
+        #         color: white; 
+        #         font-size: 14px; 
+        #         padding: 2px 8px; 
+        #         border-radius: 4px; 
+        #         background-color: #d32f2f; 
+        #         border: none;
+        #     }
+        #     QPushButton:hover { background-color: #ef5350; }
+        #     QPushButton:pressed { background-color: #b71c1c; }
+        # """)
+        # # button_layout.addWidget(clear_button)
 
-        minimize_button = QPushButton("-")
-        minimize_button.setToolTip("Minimize Console")
-        minimize_button.clicked.connect(self.minimize_console)
-        minimize_button.setStyleSheet("""
+        self.minimize_button = QPushButton("-")
+        self.minimize_button.setToolTip("Minimize Console")
+        self.minimize_button.clicked.connect(self.minimize_console)
+        self.minimize_button.setStyleSheet("""
             QPushButton { 
                 color: white; 
                 font-size: 16px; 
@@ -56,12 +57,12 @@ class Console(QWidget):
             QPushButton:hover { background-color: #4a90e2; }
             QPushButton:pressed { background-color: #357abd; }
         """)
-        button_layout.addWidget(minimize_button)
+        button_layout.addWidget(self.minimize_button)
 
-        maximize_button = QPushButton("🗖")
-        maximize_button.setToolTip("Maximize Console")
-        maximize_button.clicked.connect(self.maximize_console)
-        maximize_button.setStyleSheet("""
+        self.maximize_button = QPushButton("🗖")
+        self.maximize_button.setToolTip("Maximize Console")
+        self.maximize_button.clicked.connect(self.maximize_console)
+        self.maximize_button.setStyleSheet("""
             QPushButton { 
                 color: white; 
                 font-size: 16px; 
@@ -73,14 +74,14 @@ class Console(QWidget):
             QPushButton:hover { background-color: #4a90e2; }
             QPushButton:pressed { background-color: #357abd; }
         """)
-        button_layout.addWidget(maximize_button)
+        button_layout.addWidget(self.maximize_button)
 
         self.console_message_area = QTextEdit()
         self.console_message_area.setReadOnly(True)
-        self.console_message_area.setFixedHeight(280)
+        self.console_message_area.setFixedHeight(200)
         self.console_message_area.setStyleSheet("""
             QTextEdit { 
-                background-color: #212121; 
+                background-color: #0a0a0a; 
                 color: #e0e0e0; 
                 border: none; 
                 font-family: Consolas, monospace; 
@@ -88,6 +89,10 @@ class Console(QWidget):
                 padding: 10px; 
             }
         """)
+
+        # Initial button visibility
+        self.maximize_button.show()
+        self.minimize_button.hide()
 
     def append_to_console(self, text):
         if "MQTT" in text or "mqtt" in text or "layout" in text.lower():
@@ -117,8 +122,10 @@ class Console(QWidget):
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
 
-            # Update container height to minimized state
-            self.parent.console_container.setFixedHeight(60)  # 20 (button) + 40 (MQTT)
+            self.minimize_button.hide()
+            self.maximize_button.show()
+
+            self.parent.console_container.setFixedHeight(80)  # 40 (button) + 40 (MQTT)
             logging.info("Console minimized")
         except Exception as e:
             logging.error(f"Error minimizing console: {str(e)}")
@@ -137,8 +144,11 @@ class Console(QWidget):
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
 
-            # Update container height to fit the expanded console
-            self.parent.console_container.setFixedHeight(260)  # 200 (console) + 20 + 40
+            self.minimize_button.show()
+            self.maximize_button.hide()
+
+            self.parent.console_container.setFixedHeight(200)  
             logging.info("Console maximized")
         except Exception as e:
             logging.error(f"Error maximizing console: {str(e)}")
+

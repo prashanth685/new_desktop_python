@@ -1,8 +1,6 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout,QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea
 from PyQt5.QtCore import Qt
 import logging
-
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CreateProjectWidget(QWidget):
     def __init__(self, parent=None):
@@ -13,12 +11,12 @@ class CreateProjectWidget(QWidget):
         self.initUI()
 
     def initUI(self):
-        self.setStyleSheet("background-color: #f5f7fa;")
-        
+        self.setStyleSheet("background-color: #f7f7f9;")
+
         main_layout = QVBoxLayout()
         main_layout.setAlignment(Qt.AlignCenter)
         main_layout.setSpacing(20)
-        main_layout.setContentsMargins(40, 40, 40, 40)
+        main_layout.setContentsMargins(40, 20, 40, 20)
         self.setLayout(main_layout)
 
         scroll_area = QScrollArea()
@@ -30,16 +28,17 @@ class CreateProjectWidget(QWidget):
             }
             QScrollBar:vertical {
                 border: none;
-                background: #e9ecef;
-                width: 10px;
+                background: #e0e4e8;
+                width: 8px;
                 margin: 0px;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical {
-                background: #adb5bd;
-                border-radius: 5px;
+                background: #a0a8b2;
+                border-radius: 4px;
             }
             QScrollBar::handle:vertical:hover {
-                background: #6c757d;
+                background: #7a8290;
             }
             QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
                 height: 0px;
@@ -50,7 +49,7 @@ class CreateProjectWidget(QWidget):
         scroll_widget = QWidget()
         scroll_layout = QVBoxLayout()
         scroll_layout.setAlignment(Qt.AlignCenter)
-        scroll_layout.setSpacing(20)
+        scroll_layout.setSpacing(24)
         scroll_widget.setLayout(scroll_layout)
         scroll_area.setWidget(scroll_widget)
 
@@ -58,276 +57,334 @@ class CreateProjectWidget(QWidget):
         card_widget.setStyleSheet("""
             QWidget {
                 background-color: white;
-                border-radius: 15px;
-                box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-                padding: 30px;
+                border-radius: 8px;
+                box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+                padding: 24px;
             }
         """)
         card_layout = QVBoxLayout()
-        card_layout.setSpacing(15)
+        card_layout.setSpacing(16)
         card_widget.setLayout(card_layout)
         scroll_layout.addWidget(card_widget)
 
         title_label = QLabel("Create New Project")
         title_label.setStyleSheet("""
-            font-size: 28px;
-            font-weight: bold;
-            color: #343a40;
-            margin-bottom: 20px;
+            font-size: 20px;
+            font-weight: 600;
+            color: #1a202c;
+            margin-bottom: 8px;
         """)
         card_layout.addWidget(title_label, alignment=Qt.AlignCenter)
 
+        subtitle_label = QLabel("Start by defining project details and models")
+        subtitle_label.setStyleSheet("""
+            font-size: 14px;
+            color: #6b7280;
+            margin-bottom: 16px;
+        """)
+        card_layout.addWidget(subtitle_label, alignment=Qt.AlignCenter)
+
+        project_details_label = QLabel("Project Details")
+        project_details_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: 500;
+            color: #1a202c;
+            margin-top: 16px;
+            margin-bottom: 8px;
+        """)
+        card_layout.addWidget(project_details_label)
+
         project_form = QFormLayout()
-        project_form.setSpacing(10)
-        project_form.setLabelAlignment(Qt.AlignRight)
+        project_form.setSpacing(12)
+        project_form.setLabelAlignment(Qt.AlignLeft)
         project_form.setFormAlignment(Qt.AlignCenter)
         self.project_name_input = QLineEdit()
-        self.project_name_input.setPlaceholderText("Enter project name")
+        self.project_name_input.setPlaceholderText("Project name")
         self.project_name_input.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #ced4da;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
                 min-width: 400px;
                 background-color: #ffffff;
             }
             QLineEdit:focus {
-                border: 1px solid #007bff;
-                box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+                border-color: #3b82f6;
+                outline: none;
+            }
+            QLineEdit:hover {
+                border-color: #93c5fd;
             }
         """)
-        project_form.addRow("Project Name:", self.project_name_input)
+        project_form.addRow(self.project_name_input)
         card_layout.addLayout(project_form)
 
-        self.model_layout = QVBoxLayout()
-        self.model_layout.setSpacing(15)
-        self.model_inputs = []
-        self.add_model_input()
-        card_layout.addWidget(QLabel("Models and Channels:"))
-        card_layout.addLayout(self.model_layout)
-
-        add_model_button = QPushButton("Add Another Model")
+        add_model_button = QPushButton("+ Add Model")
         add_model_button.setStyleSheet("""
             QPushButton {
-                background-color: #17a2b8;
+                background-color: #3b82f6;
                 color: white;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
-                font-weight: bold;
-                min-width: 200px;
-            }
-            QPushButton:hover {
-                background-color: #138496;
-            }
-            QPushButton:pressed {
-                background-color: #117a8b;
-            }
-        """)
-        add_model_button.clicked.connect(self.add_model_input)
-        card_layout.addWidget(add_model_button, alignment=Qt.AlignCenter)
-
-        button_layout = QHBoxLayout()
-        button_layout.setSpacing(15)
-
-        create_button = QPushButton("Create")
-        create_button.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
-                font-weight: bold;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: 500;
                 min-width: 120px;
             }
             QPushButton:hover {
-                background-color: #0056b3;
+                background-color: #2563eb;
             }
             QPushButton:pressed {
-                background-color: #004085;
+                background-color: #1d4ed8;
             }
         """)
-        create_button.clicked.connect(self.create_project)
-        button_layout.addWidget(create_button)
+        add_model_button.clicked.connect(self.add_model_input)
+        card_layout.addWidget(add_model_button, alignment=Qt.AlignRight)
+
+        self.model_layout = QVBoxLayout()
+        self.model_layout.setSpacing(16)
+        self.model_inputs = []
+        card_layout.addLayout(self.model_layout)
+
+        button_layout = QHBoxLayout()
+        button_layout.setSpacing(12)
+        button_layout.setAlignment(Qt.AlignLeft)
 
         back_button = QPushButton("Back")
         back_button.setStyleSheet("""
             QPushButton {
-                background-color: #6c757d;
-                color: white;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
-                font-weight: bold;
-                min-width: 120px;
+                background-color: transparent;
+                color: #6b7280;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: 500;
+                min-width: 100px;
             }
             QPushButton:hover {
-                background-color: #5a6268;
+                background-color: #f1f5f9;
             }
             QPushButton:pressed {
-                background-color: #4b5359;
+                background-color: #e2e8f0;
             }
         """)
         back_button.clicked.connect(self.back_to_select)
         button_layout.addWidget(back_button)
 
+        create_button = QPushButton("Create Project")
+        create_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3b82f6;
+                color: white;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                font-weight: 500;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+            }
+            QPushButton:pressed {
+                background-color: #1d4ed8;
+            }
+        """)
+        create_button.clicked.connect(self.create_project)
+        button_layout.addWidget(create_button)
+
         card_layout.addLayout(button_layout)
 
     def add_model_input(self):
         model_widget = QWidget()
-        model_widget.setStyleSheet("background-color: #f8f9fa; border-radius: 10px; padding: 15px;")
-        model_layout = QFormLayout()
-        model_layout.setSpacing(10)
-        model_layout.setLabelAlignment(Qt.AlignRight)
-        model_layout.setFormAlignment(Qt.AlignCenter)
+        model_widget.setStyleSheet("""
+            background-color: #fafafa;
+            border-radius: 4px;
+            padding: 16px;
+            border: 1px solid #e5e7eb;
+        """)
+        model_layout = QVBoxLayout()
+        model_layout.setSpacing(12)
         model_widget.setLayout(model_layout)
 
+        model_header_layout = QHBoxLayout()
+        model_header_layout.setSpacing(8)
+        model_label = QLabel(f"Model {len(self.model_inputs) + 1}")
+        model_label.setStyleSheet("""
+            font-size: 16px;
+            font-weight: 500;
+            color: #1a202c;
+        """)
+        model_header_layout.addWidget(model_label)
+
+        remove_model_button = QPushButton("Remove Model")
+        remove_model_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                color: #ef4444;
+                border: none;
+                font-size: 14px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                color: #dc2626;
+            }
+            QPushButton:pressed {
+                color: #b91c1c;
+            }
+        """)
+        remove_model_button.clicked.connect(lambda: self.remove_model_input(model_widget))
+        model_header_layout.addWidget(remove_model_button, alignment=Qt.AlignRight)
+        model_layout.addLayout(model_header_layout)
+
+        model_form = QFormLayout()
+        model_form.setSpacing(12)
+        model_form.setLabelAlignment(Qt.AlignLeft)
+        model_form.setFormAlignment(Qt.AlignCenter)
+
         model_name_input = QLineEdit()
-        model_name_input.setPlaceholderText("Enter model name")
+        model_name_input.setPlaceholderText("Model name")
         model_name_input.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #ced4da;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
                 min-width: 400px;
                 background-color: #ffffff;
             }
             QLineEdit:focus {
-                border: 1px solid #007bff;
-                box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+                border-color: #3b82f6;
+                outline: none;
+            }
+            QLineEdit:hover {
+                border-color: #93c5fd;
             }
         """)
-        model_layout.addRow("Model Name:", model_name_input)
+        model_form.addRow(model_name_input)
 
         tag_name_input = QLineEdit()
-        tag_name_input.setPlaceholderText("Enter tag name for model")
+        tag_name_input.setPlaceholderText("Tag name")
         tag_name_input.setStyleSheet("""
             QLineEdit {
-                border: 1px solid #ced4da;
-                border-radius: 8px;
-                padding: 12px;
-                font-size: 16px;
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
                 min-width: 400px;
                 background-color: #ffffff;
             }
             QLineEdit:focus {
-                border: 1px solid #007bff;
-                box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+                border-color: #3b82f6;
+                outline: none;
+            }
+            QLineEdit:hover {
+                border-color: #93c5fd;
             }
         """)
-        model_layout.addRow("Tag Name:", tag_name_input)
+        model_form.addRow(tag_name_input)
+        model_layout.addLayout(model_form)
 
-        channel_layout = QVBoxLayout()
-        channel_layout.setSpacing(10)
-        channel_inputs = []
+        channels_label = QLabel("Channels")
+        channels_label.setStyleSheet("""
+            font-size: 14px;
+            font-weight: 500;
+            color: #1a202c;
+            margin-top: 8px;
+            margin-bottom: 8px;
+        """)
+        model_layout.addWidget(channels_label)
+
+        # Create a container for channel inputs
         channel_container = QWidget()
+        channel_layout = QVBoxLayout()
+        channel_layout.setSpacing(12)
         channel_container.setLayout(channel_layout)
+        model_layout.addWidget(channel_container)
+
+        # Track channel inputs for this model
+        channel_inputs = []
 
         def add_channel_input():
             channel_widget = QWidget()
-            channel_form = QFormLayout()
-            channel_form.setSpacing(10)
-            channel_form.setLabelAlignment(Qt.AlignRight)
-            channel_form.setFormAlignment(Qt.AlignCenter)
+            channel_form = QHBoxLayout()
+            channel_form.setSpacing(12)
             channel_widget.setLayout(channel_form)
 
             channel_name_input = QLineEdit()
-            channel_name_input.setPlaceholderText("Enter channel name")
+            channel_name_input.setPlaceholderText("Channel name")
             channel_name_input.setStyleSheet("""
                 QLineEdit {
-                    border: 1px solid #ced4da;
-                    border-radius: 8px;
-                    padding: 12px;
-                    font-size: 16px;
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
                     min-width: 400px;
                     background-color: #ffffff;
                 }
                 QLineEdit:focus {
-                    border: 1px solid #007bff;
-                    box-shadow: 0 0 5px rgba(0, 123, 255, 0.5);
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
                 }
             """)
-            channel_form.addRow("Channel Name:", channel_name_input)
+            channel_form.addWidget(channel_name_input)
 
-            remove_channel_button = QPushButton("Remove Channel")
+            remove_channel_button = QPushButton("- Remove")
             remove_channel_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #dc3545;
-                    color: white;
-                    border-radius: 8px;
-                    padding: 10px;
+                    background-color: transparent;
+                    color: #ef4444;
+                    border: none;
                     font-size: 14px;
-                    font-weight: bold;
-                    min-width: 120px;
+                    font-weight: 500;
                 }
                 QPushButton:hover {
-                    background-color: #c82333;
+                    color: #dc2626;
                 }
                 QPushButton:pressed {
-                    background-color: #bd2130;
+                    color: #b91c1c;
                 }
             """)
             remove_channel_button.clicked.connect(lambda: remove_channel(channel_widget))
-            channel_form.addRow("", remove_channel_button)
+            channel_form.addWidget(remove_channel_button)
 
             channel_inputs.append((channel_widget, channel_name_input))
             channel_layout.addWidget(channel_widget)
+            channel_container.adjustSize()
 
         def remove_channel(channel_widget):
             if len(channel_inputs) > 1:
                 for widget, _ in channel_inputs:
                     if widget == channel_widget:
                         channel_inputs.remove((widget, _))
+                        channel_layout.removeWidget(widget)
                         widget.deleteLater()
+                        channel_container.adjustSize()
                         break
 
-        add_channel_button = QPushButton("Add Channel")
+        add_channel_button = QPushButton("+ Add Channel")
         add_channel_button.setStyleSheet("""
             QPushButton {
-                background-color: #28a745;
-                color: white;
-                border-radius: 8px;
-                padding: 10px;
+                background-color: transparent;
+                color: #3b82f6;
+                border: none;
                 font-size: 14px;
-                font-weight: bold;
-                min-width: 120px;
+                font-weight: 500;
             }
             QPushButton:hover {
-                background-color: #218838;
+                color: #2563eb;
             }
             QPushButton:pressed {
-                background-color: #1e7e34;
+                color: #1d4ed8;
             }
         """)
         add_channel_button.clicked.connect(add_channel_input)
-        model_layout.addRow("Channels:", channel_container)
-        model_layout.addRow("", add_channel_button)
+        model_layout.addWidget(add_channel_button)
 
-        remove_model_button = QPushButton("Remove Model")
-        remove_model_button.setStyleSheet("""
-            QPushButton {
-                background-color: #dc3545;
-                color: white;
-                border-radius: 8px;
-                padding: 10px;
-                font-size: 14px;
-                font-weight: bold;
-                min-width: 120px;
-            }
-            QPushButton:hover {
-                background-color: #c82333;
-            }
-            QPushButton:pressed {
-                background-color: #bd2130;
-            }
-        """)
-        remove_model_button.clicked.connect(lambda: self.remove_model_input(model_widget))
-        model_layout.addRow("", remove_model_button)
-
-        add_channel_input()
+        add_channel_input()  # Add the first channel by default
         self.model_inputs.append((model_widget, model_name_input, tag_name_input, channel_inputs))
         self.model_layout.addWidget(model_widget)
 
@@ -336,6 +393,7 @@ class CreateProjectWidget(QWidget):
             for widget, _, _, _ in self.model_inputs:
                 if widget == model_widget:
                     self.model_inputs.remove((widget, _, _, _))
+                    self.model_layout.removeWidget(widget)
                     widget.deleteLater()
                     break
 
