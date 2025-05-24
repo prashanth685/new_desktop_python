@@ -1,6 +1,43 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea,QApplication
+import sys
 from PyQt5.QtCore import Qt
 import logging
+
+
+app = QApplication(sys.argv)
+
+# 🌐 Global stylesheet for QMessageBox
+app.setStyleSheet("""
+    QMessageBox {
+        background-color: #fefefe;
+        color: #1a202c;
+        font: 13px "Segoe UI";
+        border: 1px solid #cbd5e0;
+        padding: 10px;
+    }
+
+    QMessageBox QLabel {
+        color: #1a202c;
+    }
+
+    QMessageBox QPushButton {
+        background-color: #3b82f6;
+        color: white;
+        border: none;
+        padding: 6px 12px;
+        border-radius: 4px;
+        min-width: 80px;
+        font-weight: 500;
+    }
+
+    QMessageBox QPushButton:hover {
+        background-color: #2563eb;
+    }
+
+    QMessageBox QPushButton:pressed {
+        background-color: #1d4ed8;
+    }
+""")
 
 class CreateProjectWidget(QWidget):
     def __init__(self, parent=None):

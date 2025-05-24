@@ -158,6 +158,8 @@ class ProjectStructureWidget(QWidget):
             if not models:
                 self.tree_view.addTopLevelItem(QTreeWidgetItem(["No models available"]))
                 return
+            self.tree_view.setIndentation(30)  # Increase indentation for children
+
 
             self.tree_view.clear()
             for model_name, model_data in models.items():

@@ -1,7 +1,7 @@
 import sys
 import gc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSplitter, QSizePolicy, QApplication, QMessageBox, QInputDialog
-from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon, QColor
 import logging
 from dashboard.components.file_bar import FileBar
@@ -30,6 +30,8 @@ from project_structure import ProjectStructureWidget
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DashboardWindow(QWidget):
+    mqtt_status_changed = pyqtSignal(bool)  # Signal for MQTT connection status changes
+
     def __init__(self, db, email, auth_window=None):
         super().__init__()
         self.db = db
@@ -164,13 +166,13 @@ class DashboardWindow(QWidget):
         self.console_layout = QVBoxLayout()
         self.console_layout.setContentsMargins(0, 0, 0, 0)
         self.console_layout.setSpacing(0)
-        self.console_container = QWidget()  # console_container
+        self.console_container = QWidget()
         self.console_container.setStyleSheet("background-color: black;")
-        self.console_container.setFixedHeight(80)  # Initial height (minimized state: 40px + 40px)
+        self.console_container.setFixedHeight(80)
         self.console_container.setLayout(self.console_layout)
-        self.console_layout.addWidget(self.console.button_container)  # Button container at top
-        self.console_layout.addWidget(self.console.console_message_area)  # Message area (initially hidden)
-        self.console_layout.addWidget(self.mqtt_status)  # MQTT status at bottom
+        self.console_layout.addWidget(self.console.button_container)
+        self.console_layout.addWidget(self.console.console_message_area)
+        self.console_layout.addWidget(self.mqtt_status)
         main_layout.addWidget(self.console_container)
 
     def deferred_initialization(self):
@@ -230,6 +232,7 @@ class DashboardWindow(QWidget):
     def setup_mqtt(self):
         if not self.current_project:
             logging.warning("No project selected for MQTT setup")
+            self.console.append_to_console("No project selected for MQTT setup")
             return
         self.cleanup_mqtt()
         try:
@@ -239,16 +242,19 @@ class DashboardWindow(QWidget):
                 self.mqtt_handler.data_received.connect(self.on_data_received)
                 self.mqtt_handler.connection_status.connect(self.on_mqtt_status)
                 self.mqtt_handler.start()
-                self.mqtt_connected = True
-                logging.info(f"MQTT setup for project: {self.current_project}")
-                self.console.append_to_console(f"MQTT setup for project: {self.current_project}")
+                logging.info(f"MQTT setup initiated for project: {self.current_project}")
+                self.console.append_to_console(f"MQTT setup initiated for project: {self.current_project}")
             else:
                 logging.warning(f"No tags found for project: {self.current_project}")
                 self.mqtt_connected = False
+                self.mqtt_status_changed.emit(False)
+                self.console.append_to_console(f"No tags found for project: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to setup MQTT: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to setup MQTT: {str(e)}")
             self.console.append_to_console(f"Failed to setup MQTT: {str(e)}")
+            self.mqtt_connected = False
+            self.mqtt_status_changed.emit(False)
         self.sub_tool_bar.update_subtoolbar()
         self.mqtt_status.update_mqtt_status_indicator()
 
@@ -265,6 +271,7 @@ class DashboardWindow(QWidget):
             finally:
                 self.mqtt_handler = None
                 self.mqtt_connected = False
+                self.mqtt_status_changed.emit(False)
 
     def get_project_tags(self):
         try:
@@ -300,17 +307,16 @@ class DashboardWindow(QWidget):
             self.mqtt_handler.data_received.connect(self.on_data_received)
             self.mqtt_handler.connection_status.connect(self.on_mqtt_status)
             self.mqtt_handler.start()
-            self.mqtt_connected = True
-            self.sub_tool_bar.update_subtoolbar()
-            self.mqtt_status.update_mqtt_status_indicator()
-            logging.info(f"MQTT connected for project: {self.current_project}")
-            self.console.append_to_console(f"MQTT connected for project: {self.current_project}")
+            logging.info(f"MQTT connection attempt for project: {self.current_project}")
+            self.console.append_to_console(f"MQTT connection attempt for project: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to connect MQTT: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to connect MQTT: {str(e)}")
             self.console.append_to_console(f"Failed to connect MQTT: {str(e)}")
             self.mqtt_connected = False
+            self.mqtt_status_changed.emit(False)
             self.mqtt_status.update_mqtt_status_indicator()
+            self.sub_tool_bar.update_subtoolbar()
 
     def disconnect_mqtt(self):
         if not self.mqtt_connected:
@@ -318,6 +324,8 @@ class DashboardWindow(QWidget):
             return
         try:
             self.cleanup_mqtt()
+            self.mqtt_connected = False
+            self.mqtt_status_changed.emit(False)
             self.sub_tool_bar.update_subtoolbar()
             self.mqtt_status.update_mqtt_status_indicator()
             logging.info(f"MQTT disconnected for project: {self.current_project}")
@@ -328,16 +336,17 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
             self.mqtt_status.update_mqtt_status_indicator()
 
-    def on_data_received(self, tag_name, model_name, values):
+    def on_data_received(self, tag_name, model_name, values, sample_rate):
         for (feature_name, instance_model, instance_channel), feature_instance in self.feature_instances.items():
             if instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
                 try:
-                    feature_instance.on_data_received(tag_name, model_name, values)
+                    feature_instance.on_data_received(tag_name, model_name, values, sample_rate)
                 except Exception as e:
                     logging.error(f"Error in on_data_received for {feature_name}: {str(e)}")
 
     def on_mqtt_status(self, message):
         self.mqtt_connected = "Connected" in message
+        self.mqtt_status_changed.emit(self.mqtt_connected)
         self.console.append_to_console(f"MQTT Status: {message}")
         self.mqtt_status.update_mqtt_status_indicator()
         self.sub_tool_bar.update_subtoolbar()
@@ -495,7 +504,6 @@ class DashboardWindow(QWidget):
                     logging.warning(f"No model selected for {feature_name}")
                     return
                 key = (feature_name, selected_model, None)
-                window_title = f"{selected_model} - {feature_name}"
             else:
                 if not selected_channel:
                     self.console.append_to_console(f"Please select a channel to view {feature_name}.")
@@ -506,16 +514,19 @@ class DashboardWindow(QWidget):
                     logging.warning(f"No model selected for {feature_name}")
                     return
                 key = (feature_name, selected_model, selected_channel)
-                window_title = f"{selected_model} - {selected_channel} - {feature_name}"
 
+            # Check for existing subwindow
             feature_instance = self.feature_instances.get(key)
             sub_window = self.sub_windows.get(key)
-
             if feature_instance and sub_window:
                 try:
                     if sub_window.isHidden():
                         sub_window.show()
-                        logging.debug(f"Showing existing subwindow for {key}")
+                        logging.debug(f"Showing existing subwindow for {key}, ID: {id(sub_window)}")
+                    if sub_window.isMaximized():
+                        sub_window.showMaximized()
+                    else:
+                        sub_window.showNormal()
                     sub_window.raise_()
                     sub_window.activateWindow()
                     self.main_section.arrange_layout()
@@ -529,6 +540,7 @@ class DashboardWindow(QWidget):
                     feature_instance = None
                     sub_window = None
 
+            # Create new feature instance and subwindow
             feature_classes = {
                 "Tabular View": TabularViewFeature,
                 "Time View": TimeViewFeature,
@@ -554,18 +566,21 @@ class DashboardWindow(QWidget):
                     self.feature_instances[key] = feature_instance
                     widget = feature_instance.get_widget()
                     if widget:
-                        self.main_section.add_subwindow(
+                        sub_window = self.main_section.add_subwindow(
                             widget,
-                            window_title,
+                            feature_name,
                             channel_name=selected_channel,
                             model_name=selected_model
                         )
-                        sub_window = self.main_section.mdi_area.subWindowList()[-1]
-                        self.sub_windows[key] = sub_window
-                        sub_window.closeEvent = lambda event, k=key: self.on_subwindow_closed(event, k)
-                        sub_window.show()
-                        self.main_section.arrange_layout()
-                        logging.debug(f"Created new subwindow for {key} with title: {window_title}")
+                        if sub_window:
+                            self.sub_windows[key] = sub_window
+                            sub_window.closeEvent = lambda event: self.on_subwindow_closed(event, key)
+                            sub_window.show()
+                            self.main_section.arrange_layout()
+                            logging.debug(f"Created new subwindow for {key}, ID: {id(sub_window)}")
+                        else:
+                            logging.error(f"Failed to create subwindow for {feature_name}")
+                            QMessageBox.warning(self, "Error", f"Failed to create subwindow for {feature_name}")
                     else:
                         logging.error(f"Feature {feature_name} returned invalid widget")
                         QMessageBox.warning(self, "Error", f"Feature {feature_name} failed to initialize")
@@ -583,36 +598,55 @@ class DashboardWindow(QWidget):
     def on_subwindow_closed(self, event, key):
         try:
             feature_name, model_name, channel_name = key
-            logging.debug(f"Closing subwindow for key: {key}")
-            
+            logging.debug(f"Closing subwindow for key: {key}, ID: {id(self.sub_windows.get(key))}")
+
+            sub_window = self.sub_windows.get(key)
+            if not sub_window:
+                logging.warning(f"No subwindow found for key: {key}")
+                event.accept()
+                return
+
+            if sub_window.isMaximized():
+                sub_window.showNormal()
+                logging.debug(f"Restored maximized subwindow for {key}")
+
             if key in self.feature_instances:
                 instance = self.feature_instances[key]
                 if hasattr(instance, 'cleanup'):
-                    instance.cleanup()
+                    try:
+                        instance.cleanup()
+                    except Exception as e:
+                        logging.error(f"Error in cleanup for {key}: {str(e)}")
                 widget = instance.get_widget()
                 if widget:
-                    widget.hide()
-                    widget.setParent(None)
-                    widget.deleteLater()
+                    try:
+                        widget.hide()
+                        widget.setParent(None)
+                        widget.deleteLater()
+                    except Exception as e:
+                        logging.error(f"Error cleaning up widget for {key}: {str(e)}")
                 del self.feature_instances[key]
                 logging.debug(f"Cleaned up feature instance for {key}")
-            
-            if key in self.sub_windows:
-                sub_window = self.sub_windows[key]
-                sub_window.hide()
+
+            try:
+                sub_window.close()
                 self.main_section.mdi_area.removeSubWindow(sub_window)
                 sub_window.setParent(None)
                 sub_window.deleteLater()
-                del self.sub_windows[key]
-                logging.debug(f"Removed subwindow from MDI area for {key}")
-            
+                logging.debug(f"Removed subwindow from MDI area for {key}, ID: {id(sub_window)}")
+            except Exception as e:
+                logging.error(f"Error removing subwindow for {key}: {str(e)}")
+            del self.sub_windows[key]
+
             if self.current_feature == feature_name:
                 if not any(k[0] == feature_name for k in self.feature_instances.keys()):
                     self.current_feature = None
                     self.is_saving = False
                     self.sub_tool_bar.update_subtoolbar()
                     logging.debug(f"Reset current_feature as no instances of {feature_name} remain")
-            
+
+            self.main_section.mdi_area.update()
+            self.main_section.scroll_area.viewport().update()
             self.main_section.arrange_layout()
             self.main_section.mdi_area.setMinimumSize(0, 0)
             gc.collect()
@@ -666,12 +700,16 @@ class DashboardWindow(QWidget):
             logging.debug("Starting clear_content_layout")
             
             for key in list(self.sub_windows.keys()):
-                sub_window = self.sub_windows[key]
+                sub_window = self.sub_windows.get(key)
                 if sub_window:
                     try:
+                        if sub_window.isMaximized():
+                            sub_window.showNormal()
                         sub_window.close()
                         self.main_section.mdi_area.removeSubWindow(sub_window)
-                        logging.debug(f"Closed subwindow for {key} during clear_content_layout")
+                        sub_window.setParent(None)
+                        sub_window.deleteLater()
+                        logging.debug(f"Closed subwindow for {key} during clear_content_layout, ID: {id(sub_window)}")
                     except Exception as e:
                         logging.error(f"Error closing subwindow {key}: {str(e)}")
             self.sub_windows.clear()
@@ -694,6 +732,8 @@ class DashboardWindow(QWidget):
             
             self.main_section.clear_widget()
             self.main_section.mdi_area.setMinimumSize(0, 0)
+            self.main_section.mdi_area.update()
+            self.main_section.scroll_area.viewport().update()
             gc.collect()
             logging.debug("Completed clear_content_layout")
             logging.debug(f"Current widget in MainSection: {self.main_section.current_widget}")
@@ -737,4 +777,4 @@ class DashboardWindow(QWidget):
             tree_view_width = int(window_width * 0.15)
             right_container_width = int(window_width * 0.85)
             self.main_splitter.setSizes([tree_view_width, right_container_width])
-        QTimer.singleShot(50, lambda: self.main_section.arrange_layout())
+        self.main_section.arrange_layout()

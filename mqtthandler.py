@@ -75,48 +75,43 @@ class MQTTHandler(QObject):
                 if not isinstance(values, list) or not values:
                     logging.warning(f"Invalid JSON payload format: {payload_str}")
                     return
-                sample_rate = data.get("sample_rate", 1)
+                sample_rate = data.get("sample_rate", 1000)
                 num_channels = len(values)
                 logging.debug(f"Parsed JSON payload: {num_channels} channels")
             except (UnicodeDecodeError, json.JSONDecodeError):
-                expected_length = (10 + 16384) * 2
-                if len(payload) != expected_length:
-                    logging.warning(f"Invalid binary payload length: {len(payload)} bytes, expected {expected_length}")
+                payload_length = len(payload)
+                if payload_length < 20 or payload_length % 2 != 0:
+                    logging.warning(f"Invalid payload length: {payload_length} bytes")
                     return
-                values = struct.unpack(f"<{10 + 16384}H", payload)
+                num_samples = payload_length // 2
+                try:
+                    values = struct.unpack(f"<{num_samples}H", payload)
+                except struct.error as e:
+                    logging.error(f"Failed to unpack payload of {num_samples} uint16_t: {str(e)}")
+                    return
+                if len(values) < 10:
+                    logging.warning(f"Payload too short: {len(values)} samples")
+                    return
                 header = values[:10]
-                data_values = values[10:]
-                num_channels = header[2]
-                sample_rate = header[3]
-                num_samples = len(data_values) // num_channels
-                if num_samples * num_channels != len(data_values):
-                    logging.warning(f"Inconsistent data: {len(data_values)} values for {num_channels} channels")
+                data_values = values[10:]  # Start from index 10
+                num_channels = min(header[2], 4) if header[2] > 0 else 4
+                sample_rate = header[3] if header[3] > 0 else 1000
+                samples_per_channel = len(data_values) // num_channels
+                if samples_per_channel * num_channels != len(data_values):
+                    logging.warning(f"Inconsistent data: {len(data_values)} values for {num_channels} channels, expected {samples_per_channel * num_channels}")
                     return
-                channel_data = [data_values[ch * num_samples:(ch + 1) * num_samples] for ch in range(num_channels)]
-                values = [[float(v) for v in channel_data[ch]] for ch in range(num_channels)]
-                logging.debug(f"Parsed binary payload: {num_channels} channels, {num_samples} samples/channel")
+                # De-interleave data: [ch1_t0, ch2_t0, ch3_t0, ch4_t0, ch1_t1, ...]
+                channel_data = [[] for _ in range(num_channels)]
+                for i in range(0, len(data_values), num_channels):
+                    for ch in range(num_channels):
+                        if i + ch < len(data_values):
+                            channel_data[ch].append(data_values[i + ch])
+                values = [[float(v) for v in channel] for channel in channel_data]
+                logging.debug(f"Parsed binary payload: {num_channels} channels, {len(channel_data[0])} samples/channel, first 5 samples: {values[0][:5]}")
 
             if model_name:
                 self.data_received.emit(tag_name, model_name, values, sample_rate)
                 logging.debug(f"Emitted data for {tag_name}/{model_name}: {len(values)} channels, sample_rate={sample_rate}")
-
-                message_data = {
-                    "topic": tag_name,
-                    "filename": f"data{datetime.now().timestamp()}",
-                    "frameIndex": header[0] + (header[1] * 65535) if 'header' in locals() else 0,
-                    "message": payload,
-                    "numberOfChannels": num_channels,
-                    "samplingRate": sample_rate,
-                    "createdAt": datetime.now().isoformat(),
-                    "project_name": project_name,
-                    "model_name": model_name,
-                    "email": self.db.email
-                }
-                success, message = self.db.save_timeview_message(project_name, model_name, message_data)
-                if success:
-                    logging.debug(f"Saved timeview message for {tag_name}/{model_name}")
-                else:
-                    logging.error(f"Failed to save timeview message: {message}")
 
         except Exception as e:
             logging.error(f"Error processing MQTT message: {str(e)}")

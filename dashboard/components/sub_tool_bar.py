@@ -1,6 +1,75 @@
-from PyQt5.QtWidgets import QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QMenu, QComboBox, QLabel
-from PyQt5.QtCore import QSize
+from PyQt5.QtWidgets import (
+    QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QMenu, QComboBox,
+    QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
+)
+from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtGui import QIcon
+
+
+class LayoutSelectionDialog(QDialog):
+    def __init__(self, parent=None, current_layout=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Layout")
+        self.setFixedSize(300, 300)
+        self.setWindowFlags(Qt.Popup)
+
+        self.selected_layout = current_layout
+        self.layout_buttons = {}
+
+        layout = QVBoxLayout()
+        label = QLabel("Choose a layout:")
+        label.setAlignment(Qt.AlignCenter)
+        label.setStyleSheet("""
+        QLabel {
+            font-size: 16px;
+            font-weight: bold;
+            color: black;
+            margin-bottom: 10px;
+        }
+    """)
+
+        layout.addWidget(label)
+
+        grid = QGridLayout()
+
+        layouts = {
+            "1x2": "⬛⬛",
+            "2x2": "⬛⬛\n⬛⬛",
+            "3x3": "⬛⬛⬛\n⬛⬛⬛\n⬛⬛⬛"
+        }
+
+        row, col = 0, 0
+        for layout_name, icon in layouts.items():
+            btn = QPushButton(icon)
+            btn.setFixedSize(80, 80)
+            btn.setToolTip(layout_name)
+            self.layout_buttons[layout_name] = btn
+
+            btn.clicked.connect(lambda _, l=layout_name: self.select_layout(l))
+
+            grid.addWidget(btn, row, col)
+            col += 1
+            if col >= 3:
+                row += 1
+                col = 0
+
+        layout.addLayout(grid)
+        self.setLayout(layout)
+
+        self.update_button_styles()
+
+    def update_button_styles(self):
+        for layout_name, btn in self.layout_buttons.items():
+            if layout_name == self.selected_layout:
+                btn.setStyleSheet("background-color: #4a90e2; color: white; font-weight: bold;")
+            else:
+                btn.setStyleSheet("background-color: #cfd8dc;")
+
+    def select_layout(self, layout):
+        self.selected_layout = layout
+        self.update_button_styles()
+        self.accept()
+
 
 class SubToolBar(QWidget):
     def __init__(self, parent):
@@ -9,6 +78,7 @@ class SubToolBar(QWidget):
         self.selected_layout = "2x2"  # Default layout
         self.filename_combo = None
         self.initUI()
+        self.parent.mqtt_status_changed.connect(self.update_subtoolbar)
 
     def initUI(self):
         self.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eceff1, stop:1 #cfd8dc);")
@@ -25,33 +95,12 @@ class SubToolBar(QWidget):
     def update_subtoolbar(self):
         self.toolbar.clear()
         self.toolbar.setStyleSheet("""
-            QToolBar { 
-                border: none; 
-                padding: 5px; 
-                spacing: 10px; 
-            }
-            QToolButton { 
-                border: none; 
-                padding: 8px; 
-                border-radius: 5px; 
-                font-size: 24px; 
-                color: white; 
-                transition: background-color 0.3s ease; 
-            }
-            QToolButton:hover { 
-                background-color: #4a90e2; 
-            }
-            QToolButton:pressed { 
-                background-color: #357abd; 
-            }
-            QToolButton:focus { 
-                outline: none; 
-                border: 1px solid #4a90e2; 
-            }
-            QToolButton:disabled { 
-                background-color: #546e7a; 
-                color: #b0bec5; 
-            }
+            QToolBar { border: none; padding: 5px; spacing: 10px; }
+            QToolButton { border: none; padding: 8px; border-radius: 5px; font-size: 24px; color: white; }
+            QToolButton:hover { background-color: #4a90e2; }
+            QToolButton:pressed { background-color: #357abd; }
+            QToolButton:focus { outline: none; border: 1px solid #4a90e2; }
+            QToolButton:disabled { background-color: #546e7a; color: #b0bec5; }
         """)
         self.toolbar.setIconSize(QSize(25, 25))
         self.toolbar.setMovable(False)
@@ -117,13 +166,13 @@ class SubToolBar(QWidget):
             button = self.toolbar.widgetForAction(action)
             if button:
                 button.setStyleSheet(f"""
-                    QToolButton {{ 
-                        color: {color}; 
-                        font-size: 24px; 
-                        border: none; 
-                        padding: 8px; 
-                        border-radius: 5px; 
-                        transition: background-color 0.3s ease; 
+                    QToolButton {{
+                        color: {color};
+                        font-size: 24px;
+                        border: none;
+                        padding: 8px;
+                        border-radius: 5px;
+                        transition: background-color 0.3s ease;
                     }}
                     QToolButton:hover {{ background-color: #4a90e2; }}
                     QToolButton:pressed {{ background-color: #357abd; }}
@@ -152,13 +201,13 @@ class SubToolBar(QWidget):
         layout_button = self.toolbar.widgetForAction(layout_action)
         if layout_button:
             layout_button.setStyleSheet("""
-                QToolButton { 
-                    color: #ffffff; 
-                    font-size: 24px; 
-                    border: none; 
-                    padding: 8px; 
-                    border-radius: 5px; 
-                    transition: background-color 0.3s ease; 
+                QToolButton {
+                    color: #ffffff;
+                    font-size: 24px;
+                    border: none;
+                    padding: 8px;
+                    border-radius: 5px;
+                    transition: background-color 0.3s ease;
                 }
                 QToolButton:hover { background-color: #4a90e2; }
                 QToolButton:pressed { background-color: #357abd; }
@@ -177,31 +226,20 @@ class SubToolBar(QWidget):
             self.filename_combo.setCurrentText(f"data{filename_counter}")
 
     def show_layout_menu(self):
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #90a4ae;
-                color: white;
-                border: 1px solid #4a90e2;
-                border-radius: 5px;
-            }
-            QMenu::item {
-                padding: 8px 20px;
-                background-color: transparent;
-            }
-            QMenu::item:selected {
-                background-color: #4a90e2;
-            }
-        """)
+        dialog = LayoutSelectionDialog(self, current_layout=self.selected_layout)
 
-        layouts = ["1x2", "2x2", "3x3"]
-        for layout in layouts:
-            action = QAction(layout, self)
-            action.triggered.connect(lambda checked, l=layout: self.on_layout_selected(l))
-            menu.addAction(action)
+        # Center the dialog in the parent window
+        parent_geom = self.parent.geometry()
+        dialog_width = dialog.width()
+        dialog_height = dialog.height()
 
-        layout_button = self.toolbar.widgetForAction(self.toolbar.actions()[-1])
-        menu.exec_(layout_button.mapToGlobal(layout_button.rect().bottomLeft()))
+        center_x = parent_geom.x() + (parent_geom.width() - dialog_width) // 2
+        center_y = parent_geom.y() + (parent_geom.height() - dialog_height) // 2
+
+        dialog.move(center_x, center_y)
+
+        if dialog.exec_() == QDialog.Accepted:
+            self.on_layout_selected(dialog.selected_layout)
 
     def on_layout_selected(self, layout):
         self.selected_layout = layout
