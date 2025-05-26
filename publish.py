@@ -14,7 +14,7 @@ class MQTTPublisher(QObject):
         self.topics = topics if isinstance(topics, list) else [topics]
         self.count = 1
 
-        self.frequency = 15
+        self.frequency = 10
         self.amplitude = (46537 - 16390) / 2
         self.offset = (46537 + 16390) / 2
 
@@ -46,6 +46,8 @@ class MQTTPublisher(QObject):
         for i in range(samples_per_channel):
             for ch in range(self.channel):
                 temp.append(all_channel_data[i])
+        
+        
 
         assert len(temp) == 16384, f"Expected 16384 values, got {len(temp)}"
 
