@@ -1,10 +1,9 @@
 # from PyQt5.QtWidgets import (
-#     QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QMenu, QComboBox,
+#     QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QComboBox,
 #     QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
 # )
 # from PyQt5.QtCore import QSize, Qt
 # from PyQt5.QtGui import QIcon
-
 
 # class LayoutSelectionDialog(QDialog):
 #     def __init__(self, parent=None, current_layout=None):
@@ -20,13 +19,13 @@
 #         label = QLabel("Choose a layout:")
 #         label.setAlignment(Qt.AlignCenter)
 #         label.setStyleSheet("""
-#         QLabel {
-#             font-size: 16px;
-#             font-weight: bold;
-#             color: black;
-#             margin-bottom: 10px;
-#         }
-#     """)
+#             QLabel {
+#                 font-size: 16px;
+#                 font-weight: bold;
+#                 color: black;
+#                 margin-bottom: 10px;
+#             }
+#         """)
 
 #         layout.addWidget(label)
 
@@ -70,7 +69,6 @@
 #         self.update_button_styles()
 #         self.accept()
 
-
 # class SubToolBar(QWidget):
 #     def __init__(self, parent):
 #         super().__init__(parent)
@@ -78,7 +76,12 @@
 #         self.selected_layout = "2x2"  # Default layout
 #         self.filename_combo = None
 #         self.initUI()
-#         self.parent.mqtt_status_changed.connect(self.update_subtoolbar)
+#         # Connect signal with error handling
+#         try:
+#             self.parent.mqtt_status_changed.connect(self.update_subtoolbar)
+#             print("SubToolBar: mqtt_status_changed signal connected successfully")
+#         except AttributeError as e:
+#             print(f"SubToolBar: Failed to connect mqtt_status_changed signal: {e}")
 
 #     def initUI(self):
 #         self.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eceff1, stop:1 #cfd8dc);")
@@ -93,6 +96,7 @@
 #         self.update_subtoolbar()
 
 #     def update_subtoolbar(self):
+#         print(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")  # Debug log
 #         self.toolbar.clear()
 #         self.toolbar.setStyleSheet("""
 #             QToolBar { border: none; padding: 5px; spacing: 10px; }
@@ -165,12 +169,15 @@
 #             self.toolbar.addAction(action)
 #             button = self.toolbar.widgetForAction(action)
 #             if button:
+#                 # Apply background color based on enabled state
 #                 button.setStyleSheet(f"""
 #                     QToolButton {{
+#                         color: {color};
 #                         font-size: 24px;
 #                         border: none;
 #                         padding: 8px;
 #                         border-radius: 5px;
+#                         background-color: {background_color if enabled else '#546e7a'};
 #                         transition: background-color 0.3s ease;
 #                     }}
 #                     QToolButton:hover {{
@@ -184,17 +191,20 @@
 #                         color: #b0bec5;
 #                     }}
 #                 """)
+#                 print(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")  # Debug log
 
 #         is_time_view = self.parent.current_feature == "Time View"
 #         add_action("▶", "#ffffff", self.parent.start_saving, "Start Saving Data (Time View)", is_time_view and not self.parent.is_saving, "#43a047")
-#         add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "")
+#         add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "#90a4ae")
 #         self.toolbar.addSeparator()
 
-#         # Set background colors based on MQTT connection state
-#         connect_bg = "#43a047" if self.parent.mqtt_connected else "#ef5350"  # Green when connected, neutral when disconnected
-#         disconnect_bg = "#ef5350" if not self.parent.mqtt_connected else "#43a047"  # Red when disconnected, neutral when connected
-#         add_action("🔗", "#ffffff", self.parent.connect_mqtt, "Connect to MQTT", not self.parent.mqtt_connected, connect_bg)
-#         add_action("🔌", "#ffffff", self.parent.disconnect_mqtt, "Disconnect from MQTT", self.parent.mqtt_connected, disconnect_bg)
+#         # MQTT button logic: Active button is colored, inactive is gray
+#         connect_enabled = not self.parent.mqtt_connected  # Connect button active when not connected
+#         disconnect_enabled = self.parent.mqtt_connected   # Disconnect button active when connected
+#         connect_bg = "#43a047" if connect_enabled else "#546e7a"  # Green when enabled, gray when disabled
+#         disconnect_bg = "#ef5350" if disconnect_enabled else "#546e7a"  # Red when enabled, gray when disabled
+#         add_action("🔗", "#ffffff", self.parent.connect_mqtt, "Connect to MQTT", connect_enabled, connect_bg)
+#         add_action("🔌", "#ffffff", self.parent.disconnect_mqtt, "Disconnect from MQTT", disconnect_enabled, disconnect_bg)
 #         self.toolbar.addSeparator()
 
 #         spacer = QWidget()
@@ -219,7 +229,11 @@
 #                 QToolButton:hover { background-color: #4a90e2; }
 #                 QToolButton:pressed { background-color: #357abd; }
 #             """)
-            
+
+#         # Force UI refresh
+#         self.toolbar.repaint()
+#         self.repaint()
+#         print("SubToolBar: Toolbar updated and repainted")
 #     def refresh_filenames(self):
 #         if not self.filename_combo:
 #             return
@@ -234,24 +248,18 @@
 
 #     def show_layout_menu(self):
 #         dialog = LayoutSelectionDialog(self, current_layout=self.selected_layout)
-
-#         # Center the dialog in the parent window
 #         parent_geom = self.parent.geometry()
 #         dialog_width = dialog.width()
 #         dialog_height = dialog.height()
-
 #         center_x = parent_geom.x() + (parent_geom.width() - dialog_width) // 2
 #         center_y = parent_geom.y() + (parent_geom.height() - dialog_height) // 2
-
 #         dialog.move(center_x, center_y)
-
 #         if dialog.exec_() == QDialog.Accepted:
 #             self.on_layout_selected(dialog.selected_layout)
 
 #     def on_layout_selected(self, layout):
 #         self.selected_layout = layout
 #         self.parent.main_section.arrange_layout(layout=self.selected_layout)
-
 from PyQt5.QtWidgets import (
     QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QComboBox,
     QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
@@ -350,7 +358,7 @@ class SubToolBar(QWidget):
         self.update_subtoolbar()
 
     def update_subtoolbar(self):
-        print(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")  # Debug log
+        print(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")
         self.toolbar.clear()
         self.toolbar.setStyleSheet("""
             QToolBar { border: none; padding: 5px; spacing: 10px; }
@@ -410,7 +418,7 @@ class SubToolBar(QWidget):
                 color: #0d47a1;
             }
         """)
-        self.filename_combo.setEnabled(False)
+        self.filename_combo.setEnabled(self.parent.current_feature == "Time View")
         self.refresh_filenames()
         self.toolbar.addWidget(self.filename_combo)
         self.toolbar.addSeparator()
@@ -423,7 +431,6 @@ class SubToolBar(QWidget):
             self.toolbar.addAction(action)
             button = self.toolbar.widgetForAction(action)
             if button:
-                # Apply background color based on enabled state
                 button.setStyleSheet(f"""
                     QToolButton {{
                         color: {color};
@@ -445,18 +452,17 @@ class SubToolBar(QWidget):
                         color: #b0bec5;
                     }}
                 """)
-                print(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")  # Debug log
+                print(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")
 
         is_time_view = self.parent.current_feature == "Time View"
         add_action("▶", "#ffffff", self.parent.start_saving, "Start Saving Data (Time View)", is_time_view and not self.parent.is_saving, "#43a047")
         add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "#90a4ae")
         self.toolbar.addSeparator()
 
-        # MQTT button logic: Active button is colored, inactive is gray
-        connect_enabled = not self.parent.mqtt_connected  # Connect button active when not connected
-        disconnect_enabled = self.parent.mqtt_connected   # Disconnect button active when connected
-        connect_bg = "#43a047" if connect_enabled else "#546e7a"  # Green when enabled, gray when disabled
-        disconnect_bg = "#ef5350" if disconnect_enabled else "#546e7a"  # Red when enabled, gray when disabled
+        connect_enabled = not self.parent.mqtt_connected
+        disconnect_enabled = self.parent.mqtt_connected
+        connect_bg = "#43a047" if connect_enabled else "#546e7a"
+        disconnect_bg = "#ef5350" if disconnect_enabled else "#546e7a"
         add_action("🔗", "#ffffff", self.parent.connect_mqtt, "Connect to MQTT", connect_enabled, connect_bg)
         add_action("🔌", "#ffffff", self.parent.disconnect_mqtt, "Disconnect from MQTT", disconnect_enabled, disconnect_bg)
         self.toolbar.addSeparator()
@@ -484,10 +490,10 @@ class SubToolBar(QWidget):
                 QToolButton:pressed { background-color: #357abd; }
             """)
 
-        # Force UI refresh
         self.toolbar.repaint()
         self.repaint()
         print("SubToolBar: Toolbar updated and repainted")
+
     def refresh_filenames(self):
         if not self.filename_combo:
             return

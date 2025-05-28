@@ -81,11 +81,19 @@ class ToolBar(QToolBar):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
-
-    def validate_and_display(self, feature_name):
-        # Check if a model is selected
-        if not self.parent.tree_view.get_selected_model():
-            QMessageBox.warning(self, "Selection Required", "Please select a model from the tree view first.")
-            return
+    
+    def validate_and_display(self,feature_name):
+        model_based_features = {"Time View", "Time Report"}
+        
+        # If feature is model-based
+        if feature_name in model_based_features:
+            if not self.parent.tree_view.get_selected_model():
+                QMessageBox.warning(self, "Selection Required", "Please select a model from the tree view first.")
+                return
+        else:
+            if not self.parent.tree_view.get_selected_channel():
+                QMessageBox.warning(self, "Selection Required", "Please select a channel from the tree view first.")
+                return
+        
         # If validation passes, proceed to display the feature
         self.parent.display_feature_content(feature_name, self.parent.current_project)
