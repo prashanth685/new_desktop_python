@@ -1,5 +1,9 @@
-from PyQt5.QtWidgets import QToolBar, QAction, QWidget, QSizePolicy, QMessageBox
-from PyQt5.QtCore import QSize
+from PyQt5.QtWidgets import (
+    QToolBar, QToolButton, QWidget, QSizePolicy,
+    QMessageBox, QLabel, QVBoxLayout
+)
+from PyQt5.QtCore import QSize, Qt
+
 
 class ToolBar(QToolBar):
     def __init__(self, parent):
@@ -15,51 +19,51 @@ class ToolBar(QToolBar):
         self.clear()
         self.setStyleSheet("""
             QToolBar { 
-                background-color:#2C3E50;
+                background-color: #2C3E50;
                 border: none; 
                 padding: 5px; 
                 spacing: 10px; 
             }
-            QToolButton { 
-                border: none; 
-                border-radius: 6px; 
-                font-size: 35px; 
-                color: #eceff1; 
-                transition: background-color 0.3s ease; 
-            }
-            QToolButton:hover { 
-                background-color: #4a90e2; 
-            }
-            QToolButton:pressed { 
-                background-color: #357abd; 
-            }
-            QToolButton:focus { 
-                outline: none; 
-                border: 1px solid #4a90e2; 
-            }
         """)
-        self.setIconSize(QSize(30, 30))
         self.setMovable(False)
         self.setFloatable(False)
 
         def add_action(feature_name, text_icon, color, tooltip):
-            action = QAction(text_icon, self)
-            action.triggered.connect(lambda: self.validate_and_display(feature_name))
-            action.setToolTip(tooltip)
-            self.addAction(action)
-            button = self.widgetForAction(action)
-            if button:
-                button.setStyleSheet(f"""
-                    QToolButton {{ 
-                        color: {color}; 
-                        font-size: 35px; 
-                        border: none; 
-                        border-radius: 6px; 
-                        transition: background-color 0.3s ease; 
-                    }}
-                    QToolButton:hover {{ background-color: #4a90e2; }}
-                    QToolButton:pressed {{ background-color: #357abd; }}
-                """)
+            # Create a button
+            button = QToolButton()
+            button.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
+            button.setToolTip(tooltip)
+            button.setFixedSize(70, 70)
+
+            # Use emoji as icon via QLabel
+            icon_label = QLabel(text_icon)
+            icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setStyleSheet(f"font-size: 28px; color: {color};")
+
+            text_label = QLabel(feature_name)
+            text_label.setWordWrap(True)
+
+            text_label.setAlignment(Qt.AlignCenter)
+            text_label.setStyleSheet(f"font-size: 11px; color: white;font:bold")
+
+            # Layout to stack icon and label
+            layout = QVBoxLayout()
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.setSpacing(15)
+            layout.addWidget(icon_label)
+            layout.addWidget(text_label)
+
+            # Container widget for button content
+            content = QWidget()
+            content.setLayout(layout)
+            button.setLayout(layout)
+            button.clicked.connect(lambda _, name=feature_name: self.validate_and_display(name))
+
+            self.addWidget(button)
+            spacer = QWidget()
+            spacer.setFixedWidth(10)
+            self.addWidget(spacer)
+
 
         feature_actions = [
             ("Time View", "⏱️", "#ffb300", "Access Time View Feature"),
@@ -78,14 +82,14 @@ class ToolBar(QToolBar):
         for feature_name, text_icon, color, tooltip in feature_actions:
             add_action(feature_name, text_icon, color, tooltip)
 
+        # Add a spacer to push buttons to the left
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.addWidget(spacer)
-    
-    def validate_and_display(self,feature_name):
+
+    def validate_and_display(self, feature_name):
         model_based_features = {"Time View", "Time Report"}
-        
-        # If feature is model-based
+
         if feature_name in model_based_features:
             if not self.parent.tree_view.get_selected_model():
                 QMessageBox.warning(self, "Selection Required", "Please select a model from the tree view first.")
@@ -94,6 +98,6 @@ class ToolBar(QToolBar):
             if not self.parent.tree_view.get_selected_channel():
                 QMessageBox.warning(self, "Selection Required", "Please select a channel from the tree view first.")
                 return
-        
-        # If validation passes, proceed to display the feature
+
+        # Proceed to display the feature
         self.parent.display_feature_content(feature_name, self.parent.current_project)

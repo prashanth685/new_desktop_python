@@ -1,9 +1,10 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea
 from PyQt5.QtCore import QObject, QEvent, Qt
 from pyqtgraph import PlotWidget, mkPen, AxisItem, InfiniteLine, SignalProxy
 from datetime import datetime
 import time
+import re
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -87,13 +88,20 @@ class TimeViewFeature:
         """Initialize the UI with pyqtgraph subplots."""
         self.widget = QWidget()
         layout = QVBoxLayout()
-        self.widget.setLayout(layout)
-
-        layout.addWidget(QLabel(f"Time View for Model: {self.model_name}, Channels: {self.channel or 'All'}"))
+        
+        # Create a scroll area to contain the plots
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+    
 
         colors = ['r', 'g', 'b', 'y', 'c', 'm']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
+            # Set plot widget size: height=250, width=100%
+            plot_widget.setFixedHeight(250)
+            plot_widget.setMinimumWidth(0)  # Allow widget to expand to full width
             if i < self.num_channels:
                 plot_widget.setLabel('left', f'CH{i+1} Value')
             elif i == self.num_channels:
@@ -110,7 +118,7 @@ class TimeViewFeature:
             self.plot_widgets.append(plot_widget)
             self.data.append([])
 
-            vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=1))
+            vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
             vline.setVisible(False)
             plot_widget.addItem(vline)
             self.vlines.append(vline)
@@ -127,7 +135,12 @@ class TimeViewFeature:
             plot_widget.viewport().installEventFilter(tracker)
             self.trackers.append(tracker)
 
-            layout.addWidget(plot_widget)
+            scroll_layout.addWidget(plot_widget)
+
+        # Set the scroll content widget and add scroll area to main layout
+        scroll_area.setWidget(scroll_content)
+        layout.addWidget(scroll_area)
+        self.widget.setLayout(layout)
 
         if not self.model_name and self.console:
             self.console.append_to_console("No model selected in TimeViewFeature.")
@@ -142,17 +155,29 @@ class TimeViewFeature:
         """Retrieve distinct filenames from the database and update filename counter."""
         try:
             filenames = self.db.get_distinct_filenames(self.project_name, self.model_name)
+            logging.debug(f"Retrieved filenames from database: {filenames}")
+            
             if filenames:
-                # Extract the highest number from filenames like 'dataX'
-                numbers = [int(f[4:]) for f in filenames if f.startswith("data") and f[4:].isdigit()]
+                # Extract numbers from filenames like 'dataX'
+                numbers = []
+                for f in filenames:
+                    match = re.match(r"data(\d+)", f)
+                    if match:
+                        numbers.append(int(match.group(1)))
+                # Set counter to the highest number + 1, or 1 if no valid numbers found
                 self.filename_counter = max(numbers, default=0) + 1 if numbers else 1
             else:
                 self.filename_counter = 1
+                
+            logging.info(f"Updated filename counter to: {self.filename_counter}")
+            if self.console:
+                self.console.append_to_console(f"Refreshed filenames: {len(filenames)} found, counter set to {self.filename_counter}")
             return filenames
         except Exception as e:
             logging.error(f"Error refreshing filenames: {str(e)}")
             if self.console:
                 self.console.append_to_console(f"Error refreshing filenames: {str(e)}")
+            self.filename_counter = 1  # Fallback to 1 on error
             return []
 
     def start_saving(self):
@@ -162,6 +187,10 @@ class TimeViewFeature:
             if self.console:
                 self.console.append_to_console("Cannot start saving: No project or model selected")
             return
+        
+        # Refresh filenames to ensure the counter is up-to-date
+        self.refresh_filenames()
+        
         self.is_saving = True
         self.current_filename = f"data{self.filename_counter}"
         logging.info(f"Started saving data to filename: {self.current_filename}")
@@ -175,9 +204,13 @@ class TimeViewFeature:
         self.filename_counter += 1
         logging.info(f"Stopped saving data, new filename counter: {self.filename_counter}")
         if self.console:
-            self.console.append_to_console(f"Stopped saving data")
-        self.parent.sub_tool_bar.refresh_filenames()
-
+            self.console.append_to_console(f"Stopped saving data, next filename counter: {self.filename_counter}")
+        # Notify other components to refresh filenames
+        try:
+            self.parent.sub_tool_bar.refresh_filenames()
+        except AttributeError:
+            logging.warning("No sub_tool_bar found to refresh filenames")
+            
     def on_data_received(self, tag_name, model_name, values, sample_rate):
         """Handle incoming MQTT data, update plots, and save to database if saving is enabled."""
         logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "

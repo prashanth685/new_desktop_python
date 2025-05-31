@@ -23,7 +23,7 @@ class TreeView(QWidget):
             QTreeWidget::item:hover { background-color: #34495e; }
             QTreeWidget::item:selected { background-color: #4a90e2; color: white; }
         """)
-        self.tree.setFixedWidth(350)
+        self.tree.setFixedWidth(300)
         self.tree.itemClicked.connect(self.handle_item_clicked)
 
         layout = QVBoxLayout()
@@ -52,6 +52,8 @@ class TreeView(QWidget):
             for model_name, model_data in models.items():
                 # Use model_name as the key and extract metadata
                 model_item = QTreeWidgetItem(project_item)
+                model_item.setExpanded(True)  # inside the model loop
+
                 model_item.setText(0, f"🖥️ {model_name}")
                 model_item.setData(0, Qt.UserRole, {
                     "type": "model",
@@ -94,13 +96,13 @@ class TreeView(QWidget):
                 self.selected_channel_item = None
                 self.selected_model = data["name"]
                 # Display Time View by default when a model is selected
-                self.parent_widget.display_feature_content("Time View", self.project_name)
+                # self.parent_widget.display_feature_content("Time View", self.project_name)
             elif data["type"] == "channel":
                 self.selected_channel = data["name"]
                 self.selected_channel_item = item
                 self.selected_model = data["model"]
                 item.setBackground(0, QColor("#28a745"))
-                self.parent_widget.display_feature_content("Time View", self.project_name)
+                # self.parent_widget.display_feature_content("Time View", self.project_name)
             logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}, selected channel: {self.selected_channel}, selected model: {self.selected_model}")
         except Exception as e:
             logging.error(f"Error handling tree item click: {str(e)}")

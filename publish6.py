@@ -234,7 +234,7 @@ class MQTTPublisher(QObject):
         self.topics = topics if isinstance(topics, list) else [topics]
         self.count = 1
 
-        self.frequency = 15  # Hz
+        self.frequency = 10  # Hz
         self.amplitude = (46537 - 16390) / 2  # Sine wave amplitude
         self.offset = (46537 + 16390) / 2     # Sine wave offset
         self.sample_rate = 4096               # Samples per second
