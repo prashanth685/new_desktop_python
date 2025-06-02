@@ -9,7 +9,7 @@ import time
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class FFTViewFeature:
-    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, layout="horizontal"):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, layout="vertical"):
         self.parent = parent
         self.db = db
         self.project_name = project_name
