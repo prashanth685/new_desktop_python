@@ -1,12 +1,11 @@
-from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QPushButton, QScrollArea, QGridLayout)
-from PyQt5.QtCore import Qt, pyqtSignal, QEvent, QObject
+from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QPushButton, QScrollArea, QDateTimeEdit, QGridLayout)
+from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, Qt, QDateTime, QRect, pyqtSignal, QEvent, QObject
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
 import pyqtgraph as pg
 from pyqtgraph import PlotWidget, mkPen, AxisItem, InfiniteLine, SignalProxy
-from datetime import datetime, timedelta
 import numpy as np
+from datetime import datetime, timedelta
 import logging
-from PyQt5.QtCore import QRect
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -100,7 +99,7 @@ class QRangeSlider(QWidget):
     def getValues(self):
         return self.left_value, self.right_value
 
-class TimeAxisItem(AxisItem):
+class TimeAxisItem(pg.AxisItem):
     """Custom axis to display datetime on x-axis."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -130,7 +129,7 @@ class TimeReportFeature:
         self.channel = channel
         self.model_name = model_name
         self.console = console
-        self.widget = None
+        self.widget = QWidget(self.parent)
         self.plot_widgets = []
         self.plots = []
         self.data = []
@@ -146,59 +145,43 @@ class TimeReportFeature:
         self.sample_rate = 4096
         self.filenames = []
         self.selected_filename = None
+        self.file_start_time = None
+        self.file_end_time = None
         self.start_time = None
         self.end_time = None
-        self.min_time = None
-        self.max_time = None
-        self.use_full_range = True  # Flag to indicate full range plotting
+        self.use_full_range = True
         self.initUI()
         self.refresh_filenames()
 
+    def animate_button_press(self):
+        animation = QPropertyAnimation(self.ok_button, b"styleSheet")
+        # animation.setDuration(200)
+        # animation.setStartValue("background-color: #1a73e8;")
+        # animation.setEndValue("background-color: #155ab6;")
+        animation.setEasingCurve(QEasingCurve.InOutQuad)
+        animation.start()
+
     def initUI(self):
-        """Initialize the UI with filename selector, QRangeSlider, and pyqtgraph subplots."""
-        self.widget = QWidget()
         layout = QVBoxLayout()
+        self.widget.setLayout(layout)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
-            QScrollArea {
-                border-radius: 8px;
-                padding: 5px;
-            }
-            QScrollBar:vertical {
-                background: white;
-                width: 10px;
-                margin: 0px;
-                border-radius: 5px;
-            }
-            QScrollBar::handle:vertical {
-                background: black;
-                border-radius: 5px;
-            }
-            QScrollBar::add-line:vertical,
-            QScrollBar::sub-line:vertical {
-                height: 0px;
-            }
-            QScrollBar::add-page:vertical,
-            QScrollBar::sub-page:vertical {
-                background: none;
-            }
-        """)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_content.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
-
+        # Header
         header = QLabel(f"TIME REPORT FOR {self.project_name.upper()}")
         header.setStyleSheet("color: white; font-size: 26px; font-weight: bold; padding: 8px;")
-        scroll_layout.addWidget(header, alignment=Qt.AlignCenter)
+        layout.addWidget(header, alignment=Qt.AlignCenter)
 
+        # Controls container (not scrollable)
+        controls_widget = QWidget()
+        controls_widget.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        controls_layout = QVBoxLayout()
+        controls_widget.setLayout(controls_layout)
+
+        # File selection layout
         file_layout = QHBoxLayout()
         file_label = QLabel(f"Select Saved File (Model: {self.model_name or 'None'}, Channel: {self.channel or 'All'}):")
         file_label.setStyleSheet("color: white; font-size: 16px; font: bold")
-        self.filename_combo = QComboBox()
-        self.filename_combo.setFixedSize(250, 40)
-        self.filename_combo.setStyleSheet("""
+        self.file_combo = QComboBox()
+        self.file_combo.setStyleSheet("""
             QComboBox {
                 background-color: #fdfdfd;
                 color: #212121;
@@ -246,23 +229,69 @@ class TimeReportFeature:
                 color: #0d47a1;
             }
         """)
-        self.filename_combo.currentTextChanged.connect(self.on_filename_selected)
-        file_layout.addWidget(file_label)
-        file_layout.addWidget(self.filename_combo)
-        file_layout.addStretch()
-        scroll_layout.addLayout(file_layout)
+        self.file_combo.currentTextChanged.connect(self.on_filename_selected)
 
+        self.ok_button = QPushButton("OK")
+        self.ok_button.setStyleSheet("""
+            QPushButton {
+                background-color: #1a73e8;
+                color: white;
+                padding: 15px;
+                font-size: 15px;
+                width: 100px;
+                border-radius: 50%;
+                font-weight: bold;
+            }
+            QPushButton:pressed {
+                background-color: green;
+            }
+        """)
+        self.ok_button.clicked.connect(self.plot_data)
+        self.ok_button.clicked.connect(self.animate_button_press)
+        self.ok_button.setEnabled(False)
+
+        file_layout.addWidget(file_label)
+        file_layout.addWidget(self.file_combo)
+        file_layout.addWidget(self.ok_button)
+        file_layout.addStretch()
+        controls_layout.addLayout(file_layout)
+
+        # Time range selection layout
+        time_range_layout = QHBoxLayout()
+        start_time_label = QLabel("Select Start Time:")
+        start_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        self.start_time_edit = QDateTimeEdit()
+        self.start_time_edit.setStyleSheet("background-color: #34495e; color: white; border: 2px solid white; padding: 15px; font: bold; width: 200px")
+        self.start_time_edit.setDisplayFormat("HH:mm:ss")
+        self.start_time_edit.dateTimeChanged.connect(self.validate_time_range)
+
+        end_time_label = QLabel("Select End Time:")
+        end_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        self.end_time_edit = QDateTimeEdit()
+        self.end_time_edit.setStyleSheet("background-color: #34495e; color: white; border: 2px solid white; padding: 15px; font: bold; width: 200px")
+        self.end_time_edit.setDisplayFormat("HH:mm:ss")
+        self.end_time_edit.dateTimeChanged.connect(self.validate_time_range)
+
+        time_range_layout.addWidget(start_time_label)
+        time_range_layout.addWidget(self.start_time_edit)
+        time_range_layout.addWidget(end_time_label)
+        time_range_layout.addWidget(self.end_time_edit)
+        time_range_layout.addStretch()
+        controls_layout.addLayout(time_range_layout)
+
+        # Slider layout
         slider_layout = QGridLayout()
         slider_label = QLabel("Drag Time Range:")
         slider_label.setStyleSheet("color: white; font-size: 14px; font: bold")
         slider_label.setFixedWidth(150)
         self.time_slider = QRangeSlider(self.widget)
-        self.time_slider.valueChanged.connect(self.update_from_slider)
+        self.time_slider.valueChanged.connect(self.update_time_from_slider)
         slider_layout.addWidget(slider_label, 0, 0, 1, 1, Qt.AlignLeft | Qt.AlignVCenter)
         slider_layout.addWidget(self.time_slider, 0, 1, 1, 1)
         slider_layout.setColumnStretch(1, 1)
-        scroll_layout.addLayout(slider_layout)
+        controls_layout.addLayout(slider_layout)
 
+        # Time info layout
         time_info_layout = QHBoxLayout()
         self.start_time_label = QLabel("File Start Time: N/A")
         self.start_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
@@ -271,27 +300,42 @@ class TimeReportFeature:
         time_info_layout.addWidget(self.start_time_label)
         time_info_layout.addWidget(self.stop_time_label)
         time_info_layout.addStretch()
-        scroll_layout.addLayout(time_info_layout)
+        controls_layout.addLayout(time_info_layout)
 
-        apply_button = QPushButton("Apply Changes")
-        apply_button.setStyleSheet("""
-            QPushButton {
-                background-color: #1a73e8;
-                color: white;
-                padding: 15px;
-                font-size: 15px;
-                border-radius: 50%;
-                font-weight: bold;
+        layout.addWidget(controls_widget)
+
+        # Graph container with scrollbar
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setStyleSheet("""
+            QScrollArea {
+                border-radius: 8px;
+                padding: 5px;
             }
-            QPushButton:pressed {
-                background-color: #155ab6;
+            QScrollBar:vertical {
+                background: white;
+                width: 10px;
+                margin: 0px;
+                border-radius: 5px;
+            }
+            QScrollBar::handle:vertical {
+                background: black;
+                border-radius: 5px;
+            }
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {
+                background: none;
             }
         """)
-        apply_button.clicked.connect(self.plot_data)
-        apply_button.setEnabled(False)
-        self.apply_button = apply_button
-        scroll_layout.addWidget(apply_button, alignment=Qt.AlignCenter)
+        scroll_content = QWidget()
+        scroll_layout = QVBoxLayout(scroll_content)
+        scroll_content.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
 
+        # Create plot widgets
         colors = ['r', 'g', 'b', 'y', 'c', 'm']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
@@ -333,7 +377,7 @@ class TimeReportFeature:
             scroll_layout.addWidget(plot_widget)
 
         scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area)
+        layout.addWidget(scroll_area, stretch=1)
         self.widget.setLayout(layout)
 
         if not self.model_name and self.console:
@@ -347,54 +391,62 @@ class TimeReportFeature:
     def refresh_filenames(self):
         try:
             self.filenames = self.db.get_distinct_filenames(self.project_name, self.model_name)
-            self.filename_combo.clear()
+            self.file_combo.clear()
             if not self.filenames:
-                self.filename_combo.addItem("No Files Available")
+                self.file_combo.addItem("No Files Available")
                 self.start_time_label.setText("File Start Time: N/A")
                 self.stop_time_label.setText("File Stop Time: N/A")
+                self.start_time_edit.setEnabled(False)
+                self.end_time_edit.setEnabled(False)
                 self.time_slider.setEnabled(False)
-                self.apply_button.setEnabled(False)
+                self.ok_button.setEnabled(False)
                 if self.console:
                     self.console.append_to_console("No saved files found for this project.")
             else:
-                self.filename_combo.addItems(self.filenames)
+                self.file_combo.addItems(self.filenames)
+                self.start_time_edit.setEnabled(True)
+                self.end_time_edit.setEnabled(True)
                 self.time_slider.setEnabled(True)
-                self.apply_button.setEnabled(True)
-                self.update_time_labels(self.filename_combo.currentText())
+                self.ok_button.setEnabled(True)
+                self.update_time_labels(self.file_combo.currentText())
                 if self.console:
                     self.console.append_to_console(f"Refreshed filenames: {len(self.filenames)} found")
         except Exception as e:
             logging.error(f"Error refreshing filenames: {str(e)}")
-            self.filename_combo.addItem("Error Loading Files")
+            self.file_combo.addItem("Error Loading Files")
             self.start_time_label.setText("File Start Time: N/A")
             self.stop_time_label.setText("File Stop Time: N/A")
+            self.start_time_edit.setEnabled(False)
+            self.end_time_edit.setEnabled(False)
             self.time_slider.setEnabled(False)
-            self.apply_button.setEnabled(False)
+            self.ok_button.setEnabled(False)
             if self.console:
                 self.console.append_to_console(f"Error refreshing filenames: {str(e)}")
 
     def on_filename_selected(self, filename):
         self.selected_filename = filename
-        self.use_full_range = True  # Reset to full range on file selection
+        self.use_full_range = True
         self.update_time_labels(filename)
         self.clear_plots()
         if filename and filename not in ["No Files Available", "Error Loading Files"]:
-            self.apply_button.setEnabled(True)
+            self.ok_button.setEnabled(True)
         else:
-            self.apply_button.setEnabled(False)
+            self.ok_button.setEnabled(False)
+            self.file_start_time = None
+            self.file_end_time = None
             self.start_time = None
             self.end_time = None
-            self.min_time = None
-            self.max_time = None
 
     def update_time_labels(self, filename):
         if not filename or filename in ["No Files Available", "Error Loading Files"]:
             self.start_time_label.setText("File Start Time: N/A")
             self.stop_time_label.setText("File Stop Time: N/A")
+            self.start_time_edit.setEnabled(False)
+            self.end_time_edit.setEnabled(False)
             self.time_slider.setEnabled(False)
-            self.apply_button.setEnabled(False)
-            self.min_time = None
-            self.max_time = None
+            self.ok_button.setEnabled(False)
+            self.file_start_time = None
+            self.file_end_time = None
             return
 
         try:
@@ -406,56 +458,121 @@ class TimeReportFeature:
             if not messages:
                 self.start_time_label.setText("File Start Time: N/A")
                 self.stop_time_label.setText("File Stop Time: N/A")
+                self.start_time_edit.setEnabled(False)
+                self.end_time_edit.setEnabled(False)
                 self.time_slider.setEnabled(False)
-                self.apply_button.setEnabled(False)
-                self.min_time = None
-                self.max_time = None
+                self.ok_button.setEnabled(False)
+                self.file_start_time = None
+                self.file_end_time = None
                 if self.console:
                     self.console.append_to_console(f"No data found for file: {filename}")
                 return
 
-            created_times = [datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp() for msg in messages]
-            self.min_time = min(created_times)
-            self.max_time = max(created_times)
-            self.start_time = self.min_time
-            self.end_time = self.max_time
-            self.start_time_label.setText(f"File Start Time: {datetime.fromtimestamp(self.min_time).strftime('%H:%M:%S')}")
-            self.stop_time_label.setText(f"File Stop Time: {datetime.fromtimestamp(self.max_time).strftime('%H:%M:%S')}")
-            self.time_slider.setRange(0, 1000)
-            self.time_slider.setValues(0, 1000)
-            self.time_slider.setEnabled(True)
-            self.apply_button.setEnabled(True)
-            self.use_full_range = True
+            timestamps = []
+            for msg in messages:
+                try:
+                    created_at = datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp()
+                    timestamps.append(created_at)
+                except Exception as e:
+                    logging.warning(f"Invalid timestamp in {filename}: {e}")
+                    if self.console:
+                        self.console.append_to_console(f"Invalid timestamp in {filename}: {e}")
+                    continue
+
+            if timestamps:
+                self.file_start_time = datetime.fromtimestamp(min(timestamps))
+                self.file_end_time = datetime.fromtimestamp(max(timestamps))
+                self.start_time = min(timestamps)
+                self.end_time = max(timestamps)
+                self.start_time_label.setText(f"File Start Time: {self.file_start_time.strftime('%H:%M:%S')}")
+                self.stop_time_label.setText(f"File Stop Time: {self.file_end_time.strftime('%H:%M:%S')}")
+                self.start_time_edit.setDateTime(QDateTime(self.file_start_time))
+                self.end_time_edit.setDateTime(QDateTime(self.file_end_time))
+                self.time_slider.setRange(0, 1000)
+                self.time_slider.setValues(0, 1000)
+                self.start_time_edit.setEnabled(True)
+                self.end_time_edit.setEnabled(True)
+                self.time_slider.setEnabled(True)
+                self.ok_button.setEnabled(True)
+            else:
+                self.start_time_label.setText("File Start Time: N/A")
+                self.stop_time_label.setText("File Stop Time: N/A")
+                self.start_time_edit.setEnabled(False)
+                self.end_time_edit.setEnabled(False)
+                self.time_slider.setEnabled(False)
+                self.ok_button.setEnabled(False)
+                self.file_start_time = None
+                self.file_end_time = None
         except Exception as e:
-            logging.error(f"Error updating time labels for {filename}: {str(e)}")
+            logging.error(f"Error updating time labels for {filename}: {e}")
             self.start_time_label.setText("File Start Time: N/A")
             self.stop_time_label.setText("File Stop Time: N/A")
+            self.start_time_edit.setEnabled(False)
+            self.end_time_edit.setEnabled(False)
             self.time_slider.setEnabled(False)
-            self.apply_button.setEnabled(False)
-            self.min_time = None
-            self.max_time = None
+            self.ok_button.setEnabled(False)
             if self.console:
                 self.console.append_to_console(f"Error loading time data for {filename}: {str(e)}")
+            self.file_start_time = None
+            self.file_end_time = None
 
-    def update_from_slider(self):
-        if not self.min_time or not self.max_time:
+    def update_time_from_slider(self):
+        if not self.file_start_time or not self.file_end_time:
             return
 
-        try:
-            left_pos, right_pos = self.time_slider.getValues()
-            if left_pos >= right_pos:
-                return
+        total_duration = (self.file_end_time - self.file_start_time).total_seconds()
+        if total_duration <= 0:
+            return
 
-            time_range = self.max_time - self.min_time
-            self.start_time = self.min_time + (left_pos / 1000.0) * time_range
-            self.end_time = self.min_time + (right_pos / 1000.0) * time_range
-            self.start_time_label.setText(f"File Start Time: {datetime.fromtimestamp(self.start_time).strftime('%H:%M:%S')}")
-            self.stop_time_label.setText(f"File Stop Time: {datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')}")
-            self.use_full_range = (left_pos == 0 and right_pos == 1000)  # Check if full range is selected
-        except Exception as e:
-            logging.error(f"Error updating from slider: {str(e)}")
+        left_pos, right_pos = self.time_slider.getValues()
+        if left_pos > right_pos:
+            left_pos, right_pos = right_pos, left_pos
+            self.time_slider.setValues(left_pos, right_pos)
+
+        left_fraction = left_pos / 1000.0
+        right_fraction = right_pos / 1000.0
+
+        start_seconds = left_fraction * total_duration
+        end_seconds = right_fraction * total_duration
+        start_time = self.file_start_time + timedelta(seconds=start_seconds)
+        end_time = self.file_start_time + timedelta(seconds=end_seconds)
+
+        self.start_time = start_time.timestamp()
+        self.end_time = end_time.timestamp()
+
+        self.start_time_edit.blockSignals(True)
+        self.end_time_edit.blockSignals(True)
+        self.start_time_edit.setDateTime(QDateTime(start_time))
+        self.end_time_edit.setDateTime(QDateTime(end_time))
+        self.start_time_edit.blockSignals(False)
+        self.end_time_edit.blockSignals(False)
+
+        self.use_full_range = (left_pos == 0 and right_pos == 1000)
+        self.validate_time_range()
+
+    def validate_time_range(self):
+        start_time = self.start_time_edit.dateTime().toPyDateTime()
+        end_time = self.end_time_edit.dateTime().toPyDateTime()
+
+        self.start_time = start_time.timestamp()
+        self.end_time = end_time.timestamp()
+
+        if start_time >= end_time:
+            self.ok_button.setEnabled(False)
             if self.console:
-                self.console.append_to_console(f"Error updating from slider: {str(e)}")
+                self.console.append_to_console("Error: Start time must be before end time.")
+        else:
+            self.ok_button.setEnabled(True)
+            if self.file_start_time and self.file_end_time:
+                total_duration = (self.file_end_time - self.file_start_time).total_seconds()
+                if total_duration > 0:
+                    start_offset = (start_time - self.file_start_time).total_seconds()
+                    end_offset = (end_time - self.file_start_time).total_seconds()
+                    left_pos = (start_offset / total_duration) * 1000
+                    right_pos = (end_offset / total_duration) * 1000
+                    self.time_slider.blockSignals(True)
+                    self.time_slider.setValues(left_pos, right_pos)
+                    self.time_slider.blockSignals(False)
 
     def clear_plots(self):
         for plot in self.plots:
@@ -473,7 +590,8 @@ class TimeReportFeature:
         logging.debug("Cleared all plots")
 
     def plot_data(self):
-        if not self.selected_filename or self.selected_filename in ["No Files Available", "Error Loading Files"]:
+        filename = self.file_combo.currentText()
+        if not filename or filename in ["No Files Available", "Error Loading Files"]:
             self.clear_plots()
             if self.console:
                 self.console.append_to_console("No valid file selected to plot.")
@@ -483,20 +601,19 @@ class TimeReportFeature:
             messages = self.db.get_timeview_messages(
                 self.project_name,
                 model_name=self.model_name,
-                filename=self.selected_filename
+                filename=filename
             )
             if not messages:
                 self.clear_plots()
                 if self.console:
-                    self.console.append_to_console(f"No data found for filename {self.selected_filename}")
+                    self.console.append_to_console(f"No data found for filename {filename}")
                 return
 
-            # Use full range if use_full_range is True, else use slider-defined range
             if self.use_full_range:
-                self.start_time = self.min_time
-                self.end_time = self.max_time
-                self.start_time_label.setText(f"File Start Time: {datetime.fromtimestamp(self.start_time).strftime('%H:%M:%S')}")
-                self.stop_time_label.setText(f"File Stop Time: {datetime.fromtimestamp(self.end_time).strftime('%H:%M:%S')}")
+                self.start_time = self.file_start_time.timestamp()
+                self.end_time = self.file_end_time.timestamp()
+                self.start_time_edit.setDateTime(QDateTime(self.file_start_time))
+                self.end_time_edit.setDateTime(QDateTime(self.file_end_time))
                 self.time_slider.setValues(0, 1000)
 
             if self.start_time >= self.end_time:
@@ -505,53 +622,73 @@ class TimeReportFeature:
                     self.console.append_to_console("Error: Start time must be before end time.")
                 return
 
-            # Filter messages by time range
-            filtered_messages = []
-            for msg in messages:
-                created_at = datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp()
-                if created_at >= self.start_time and created_at <= self.end_time:
-                    filtered_messages.append(msg)
+            # Filter messages by time range and sort by timestamp
+            filtered_messages = [
+                msg for msg in messages
+                if self.start_time <= datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp() <= self.end_time
+            ]
+            filtered_messages.sort(key=lambda x: datetime.fromisoformat(x['createdAt'].replace('Z', '+00:00')).timestamp())
 
             if not filtered_messages:
                 self.clear_plots()
                 if self.console:
-                    self.console.append_to_console(f"No data within time range for filename {self.selected_filename}")
+                    self.console.append_to_console(f"No data within time range for filename {filename}")
                 return
 
-            # Use the latest message
-            msg = filtered_messages[-1]
-            channel_data = msg['message']['channel_data']
-            tacho_freq = msg['message']['tacho_freq']
-            tacho_trigger = msg['message']['tacho_trigger']
-            self.sample_rate = msg.get('samplingRate', 4096)
-            channel_samples = msg.get('samplingSize', 4096)
-            tacho_samples = len(tacho_freq)
+            # Initialize lists to aggregate data
+            channel_data_agg = [[] for _ in range(self.num_channels)]
+            tacho_freq_agg = []
+            tacho_trigger_agg = []
+            channel_times_agg = []
+            tacho_times_agg = []
+            self.sample_rate = filtered_messages[0].get('samplingRate', 4096)
 
-            # Validate data
-            if len(channel_data) != self.num_channels or len(tacho_freq) != tacho_samples or len(tacho_trigger) != tacho_samples:
-                self.clear_plots()
-                if self.console:
-                    self.console.append_to_console(f"Data length mismatch in {self.selected_filename}")
-                return
+            # Aggregate data from all messages
+            for msg in filtered_messages:
+                created_at = datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp()
+                channel_data = msg['message']['channel_data']
+                tacho_freq = msg['message']['tacho_freq']
+                tacho_trigger = msg['message']['tacho_trigger']
+                channel_samples = msg.get('samplingSize', 4096)
+                tacho_samples = len(tacho_freq)
 
-            # Generate time arrays
-            created_at = datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp()
-            channel_time_step = 1.0 / self.sample_rate
-            tacho_time_step = 1.0 / self.sample_rate
-            self.channel_times = np.array([created_at - (channel_samples - 1) * channel_time_step + i * channel_time_step for i in range(channel_samples)])
-            self.tacho_times = np.array([created_at - (tacho_samples - 1) * tacho_time_step + i * tacho_time_step for i in range(tacho_samples)])
+                # Validate data lengths
+                if len(channel_data) != self.num_channels or len(tacho_freq) != tacho_samples or len(tacho_trigger) != tacho_samples:
+                    if self.console:
+                        self.console.append_to_console(f"Data length mismatch in message at {created_at} for {filename}")
+                    continue
 
-            # Filter data within time range
-            channel_mask = (self.channel_times >= self.start_time) & (self.channel_times <= self.end_time)
-            tacho_mask = (self.tacho_times >= self.start_time) & (self.tacho_times <= self.end_time)
-            self.channel_times = self.channel_times[channel_mask]
-            self.tacho_times = self.tacho_times[tacho_mask]
+                # Generate time arrays for this message
+                channel_time_step = 1.0 / self.sample_rate
+                tacho_time_step = 1.0 / self.sample_rate
+                channel_times = np.array([
+                    created_at - (channel_samples - 1) * channel_time_step + i * channel_time_step
+                    for i in range(channel_samples)
+                ])
+                tacho_times = np.array([
+                    created_at - (tacho_samples - 1) * tacho_time_step + i * tacho_time_step
+                    for i in range(tacho_samples)
+                ])
 
-            # Update data
+                # Filter times within the selected range
+                channel_mask = (channel_times >= self.start_time) & (channel_times <= self.end_time)
+                tacho_mask = (tacho_times >= self.start_time) & (tacho_times <= self.end_time)
+
+                # Append filtered data
+                for ch in range(self.num_channels):
+                    channel_data_agg[ch].extend(np.array(channel_data[ch])[channel_mask])
+                tacho_freq_agg.extend(np.array(tacho_freq)[tacho_mask])
+                tacho_trigger_agg.extend(np.array(tacho_trigger)[tacho_mask])
+                channel_times_agg.extend(channel_times[channel_mask])
+                tacho_times_agg.extend(tacho_times[tacho_mask])
+
+            # Convert aggregated lists to numpy arrays
             for ch in range(self.num_channels):
-                self.data[ch] = np.array(channel_data[ch])[channel_mask]
-            self.data[self.num_channels] = np.array(tacho_freq)[tacho_mask]
-            self.data[self.num_channels + 1] = np.array(tacho_trigger)[tacho_mask]
+                self.data[ch] = np.array(channel_data_agg[ch])
+            self.data[self.num_channels] = np.array(tacho_freq_agg)
+            self.data[self.num_channels + 1] = np.array(tacho_trigger_agg)
+            self.channel_times = np.array(channel_times_agg)
+            self.tacho_times = np.array(tacho_times_agg)
 
             # Clear existing plots
             for widget in self.plot_widgets:
@@ -561,7 +698,7 @@ class TimeReportFeature:
                 if widget.getAxis('left').labelText == 'Tacho Trigger':
                     widget.setYRange(-0.5, 1.5, padding=0)
 
-            # Plot data
+            # Plot the aggregated data
             colors = ['r', 'g', 'b', 'y', 'c', 'm']
             for ch in range(self.num_plots):
                 times = self.tacho_times if ch >= self.num_channels else self.channel_times
@@ -573,15 +710,15 @@ class TimeReportFeature:
                         self.plot_widgets[ch].enableAutoRange(axis='y')
                     elif ch == self.num_channels:
                         self.plot_widgets[ch].enableAutoRange(axis='y')
-                    else:
-                        self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
-                    vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
-                    vline.setVisible(False)
-                    self.plot_widgets[ch].addItem(vline)
-                    self.vlines[ch] = vline
+                    # else:
+                    #     self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
+                    # vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
+                    # vline.setVisible(False)
+                    # self.plot_widgets[ch].addItem(vline)
+                    # self.vlines[ch] = vline
                 else:
                     if self.console:
-                        self.console.append_to_console(f"No data for plot {ch}")
+                        self.console.append_to_console(f"No data for plot {ch} in time range")
 
             # Plot trigger lines
             if len(self.data[self.num_plots - 1]) > 0:
@@ -599,7 +736,7 @@ class TimeReportFeature:
                         self.trigger_lines[self.num_plots - 1].append(line)
 
             if self.console:
-                self.console.append_to_console(f"Time Report ({self.model_name}): Plotted {self.num_plots} plots for {self.selected_filename}")
+                self.console.append_to_console(f"Time Report ({self.model_name}): Plotted {self.num_plots} plots for {filename}")
         except Exception as e:
             logging.error(f"Error plotting data: {str(e)}")
             self.clear_plots()

@@ -233,16 +233,33 @@ class SubToolBar(QWidget):
         print("SubToolBar: Toolbar updated and repainted")
 
     def refresh_filenames(self):
+        """Refresh the QComboBox with filenames from the database and the current filename being saved."""
         if not self.filename_combo:
             return
         self.filename_combo.clear()
         if self.parent.current_feature == "Time View" and hasattr(self.parent.current_widget, 'refresh_filenames'):
+            # Get existing filenames from the database
             filenames = self.parent.current_widget.refresh_filenames()
             for filename in filenames:
                 self.filename_combo.addItem(filename)
-            filename_counter = self.parent.current_widget.filename_counter
-            self.filename_combo.addItem(f"data{filename_counter}")
-            self.filename_combo.setCurrentText(f"data{filename_counter}")
+            
+            # Get the current filename and counter from TimeViewFeature
+            current_filename = getattr(self.parent.current_widget, 'current_filename', None)
+            filename_counter = getattr(self.parent.current_widget, 'filename_counter', 1)
+            
+            # If currently saving, ensure the current filename is included
+            if current_filename and self.parent.current_widget.is_saving:
+                if current_filename not in filenames:
+                    self.filename_combo.addItem(current_filename)
+                self.filename_combo.setCurrentText(current_filename)
+            else:
+                # Add the next filename (dataX) based on the counter
+                next_filename = f"data{filename_counter}"
+                self.filename_combo.addItem(next_filename)
+                self.filename_combo.setCurrentText(next_filename)
+
+            print(f"SubToolBar: Refreshed filenames, current: {self.filename_combo.currentText()}, "
+                  f"saving: {self.parent.current_widget.is_saving}, counter: {filename_counter}")
 
     def show_layout_menu(self):
         dialog = LayoutSelectionDialog(self, current_layout=self.selected_layout)
