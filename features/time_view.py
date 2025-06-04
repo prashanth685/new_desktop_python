@@ -269,7 +269,7 @@ class TimeViewFeature:
                     elif ch == self.num_channels:
                         self.plot_widgets[ch].enableAutoRange(axis='y')
                     else:
-                        self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
+                        self.plot_widgets[ch].setYRange(0, 1.0, padding=0)
                 else:
                     logging.warning(f"No data for plot {ch}, data_len={len(self.data[ch])}, times_len={len(times)}")
                     if self.console:

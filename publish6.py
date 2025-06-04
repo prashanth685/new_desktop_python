@@ -109,7 +109,7 @@ class MQTTPublisher(QObject):
 
 if __name__ == "__main__":
     app = QApplication([])
-    broker = "192.168.1.179"
+    broker = "192.168.1.231"
     topics = ["sarayu/tag1/topic1|m/s"]
     mqtt_publisher = MQTTPublisher(broker, topics)
     app.exec_()

@@ -79,6 +79,8 @@ class MainSection(QWidget):
             subwindow = QMdiSubWindow()
             subwindow.setWidget(widget)
             subwindow.setOption(QMdiSubWindow.RubberBandMove, False)
+            subwindow.setWindowFlags(subwindow.windowFlags() & ~Qt.WindowMinimizeButtonHint)
+
             title = f"{model_name or ''} - {channel_name or ''} - {feature_name}".strip(" - ")
             subwindow.setWindowTitle(title)
             self.mdi_area.addSubWindow(subwindow)
@@ -116,6 +118,7 @@ class MainSection(QWidget):
         except Exception as e:
             logging.error(f"Error in clear_widget: {str(e)}")
 
+
     def arrange_layout(self, layout=None, prompt_for_layout=False):
         try:
             if self.current_widget:
@@ -138,28 +141,37 @@ class MainSection(QWidget):
             MIN_SUBWINDOW_HEIGHT = 150
             GAP = 5
 
+            # Calculate subwindow size based on viewport
             subwindow_width = max((viewport_width - (cols + 1) * GAP) // cols, MIN_SUBWINDOW_WIDTH)
             subwindow_height = max((viewport_height - (rows + 1) * GAP) // rows, MIN_SUBWINDOW_HEIGHT)
+
+            # Calculate total rows needed to accommodate all subwindows
+            total_subwindows = len(subwindows)
+            subwindows_per_page = rows * cols
+            total_rows_needed = (total_subwindows + cols - 1) // cols  # Ceiling division
 
             for idx, subwindow in enumerate(subwindows):
                 if subwindow.isMaximized():
                     subwindow.showNormal()
-                row = (idx % (rows * cols)) // cols
-                col = (idx % (rows * cols)) % cols
+                # Calculate position based on a continuous grid
+                row = idx // cols
+                col = idx % cols
                 x = GAP + col * (subwindow_width + GAP)
                 y = GAP + row * (subwindow_height + GAP)
                 subwindow.setGeometry(x, y, subwindow_width, subwindow_height)
+                subwindow.show()  # Ensure all subwindows are visible
                 logging.debug(f"Arranged subwindow {subwindow.windowTitle()} at ({x}, {y}) with size ({subwindow_width}x{subwindow_height})")
 
-            total_pages_needed = (len(subwindows) + (rows * cols) - 1) // (rows * cols)
-            total_height = total_pages_needed * (viewport_height + GAP)
+            # Set MDI area size to accommodate all subwindows
             total_width = viewport_width + GAP * 2
+            total_height = total_rows_needed * (subwindow_height + GAP) + GAP
             self.mdi_area.setMinimumSize(total_width, total_height)
             self.mdi_area.update()
 
             logging.info(
                 f"Arranged {len(subwindows)} MDI subwindows in a {self.current_layout} grid: "
-                f"Subwindow size ({subwindow_width}x{subwindow_height})"
+                f"Subwindow size ({subwindow_width}x{subwindow_height}), "
+                f"Total size ({total_width}x{total_height})"
             )
         except Exception as e:
             logging.error(f"Error in arrange_layout: {str(e)}")
