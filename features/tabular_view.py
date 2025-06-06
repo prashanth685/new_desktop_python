@@ -5,7 +5,6 @@ from datetime import datetime
 import math
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ChannelData:
     def __init__(self, channel_name, date_time, rpm, gap, direct, bandpass, one_xa, one_xp, two_xa, two_xp, nx_amp, nx_phase):

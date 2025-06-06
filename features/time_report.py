@@ -7,7 +7,6 @@ import numpy as np
 from datetime import datetime, timedelta
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class QRangeSlider(QWidget):
     """Custom dual slider widget for selecting a time range."""

@@ -27,7 +27,6 @@ from select_project import SelectProjectWidget
 from create_project import CreateProjectWidget
 from project_structure import ProjectStructureWidget
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class DashboardWindow(QWidget):
     mqtt_status_changed = pyqtSignal(bool)  # Signal for MQTT connection status changes

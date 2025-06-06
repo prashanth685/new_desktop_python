@@ -4,7 +4,6 @@ import numpy as np
 import math
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class OrbitFeature:
     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
@@ -38,11 +37,23 @@ class OrbitFeature:
         self.widget.setLayout(main_layout)
 
         # Label
-        label = QLabel(f"Orbit Plot for Model: {self.model_name if self.model_name else 'None'}")
-        main_layout.addWidget(label)
+        # label = QLabel(f"Orbit Plot for Model: {self.model_name if self.model_name else 'None'}")
+        # main_layout.addWidget(label)
 
         # Channel selection combo box
         self.combo = QComboBox()
+        self.combo.setStyleSheet("""
+            QComboBox {
+                font-size: 16px;
+                padding: 5px;
+                background-color:white;
+            }
+            QComboBox QAbstractItemView {
+                font-size: 16px;
+                background-color:white;
+                                 
+            }
+        """)
         self.update_combo_options()
         self.combo.currentIndexChanged.connect(self.on_combo_changed)
         main_layout.addWidget(self.combo)
@@ -80,7 +91,6 @@ class OrbitFeature:
                 "Channels 1 & 4",
                 "Channels 2 & 3",
                 "Channels 2 & 4",
-                "Channels 1, 2, 3 & 4"
             ]
         self.combo.addItems(options)
 
@@ -168,6 +178,7 @@ class OrbitFeature:
         # Orbit plots
         for i, (ch_x, ch_y) in enumerate(self.selected_pairs):
             plot_widget = pg.PlotWidget()
+            plot_widget.setBackground('w')  # Set white background
             plot_widget.setFixedSize(500, 500)  # Increased size
             self.plot_layout.addWidget(plot_widget)
             plot_item = plot_widget.getPlotItem()
@@ -190,6 +201,7 @@ class OrbitFeature:
         # Time-domain plots for selected channels
         for ch in sorted(channels_to_plot):
             time_plot_widget = pg.PlotWidget()
+            time_plot_widget.setBackground('w')  # Set white background
             time_plot_widget.setFixedSize(500, 500)  # Increased size
             self.plot_layout.addWidget(time_plot_widget)
             time_plot_item = time_plot_widget.getPlotItem()

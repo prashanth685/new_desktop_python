@@ -109,7 +109,7 @@ class MQTTPublisher:
             self.timer.start()
 
 if __name__ == "__main__":
-    broker = '192.168.1.179'
+    broker = '192.168.1.235'
     topics = ['sarayu/d1/topic1']
     publisher = MQTTPublisher(broker, topics)
     publisher.client.loop_forever()

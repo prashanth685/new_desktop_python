@@ -3,7 +3,6 @@ from PyQt5.QtCore import Qt
 from project_structure import ProjectStructureWidget
 import logging
 
-# logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class ExistingProjectWidget(QWidget):
     def __init__(self, parent=None):

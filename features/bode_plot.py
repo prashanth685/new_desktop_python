@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class BodePlotFeature:
     def __init__(self, parent, db, project_name):

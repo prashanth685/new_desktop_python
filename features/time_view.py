@@ -7,7 +7,6 @@ import time
 import re
 import logging
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TimeAxisItem(AxisItem):
     """Custom axis to display datetime on x-axis."""

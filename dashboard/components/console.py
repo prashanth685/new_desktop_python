@@ -25,23 +25,6 @@ class Console(QWidget):
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         button_layout.addWidget(spacer)
 
-        # clear_button = QPushButton("Clear")
-        # clear_button.setToolTip("Clear Console Output")
-        # clear_button.clicked.connect(self.clear_console)
-        # clear_button.setStyleSheet("""
-        #     QPushButton { 
-        #         color: white; 
-        #         font-size: 14px; 
-        #         padding: 2px 8px; 
-        #         border-radius: 4px; 
-        #         background-color: #d32f2f; 
-        #         border: none;
-        #     }
-        #     QPushButton:hover { background-color: #ef5350; }
-        #     QPushButton:pressed { background-color: #b71c1c; }
-        # """)
-        # # button_layout.addWidget(clear_button)
-
         self.minimize_button = QPushButton("-")
         self.minimize_button.setToolTip("Minimize Console")
         self.minimize_button.clicked.connect(self.minimize_console)

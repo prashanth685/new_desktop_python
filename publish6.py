@@ -18,7 +18,6 @@ class MQTTPublisher(QObject):
         self.frequency = 10  # Hz
         self.amplitude=3
         self.amplitude = ((self.amplitude * 0.5) / (3.3 / 65535))
-        # self.amplitude = (46537 - 16390) / 2  # Sine wave amplitude
         self.offset = (46537 + 16390) / 2     # Sine wave offset
         self.sample_rate = 4096               # Samples per second
         self.time_per_message = 1.0           # 1 second for 4096 samples
@@ -111,7 +110,7 @@ class MQTTPublisher(QObject):
 
 if __name__ == "__main__":
     app = QApplication([])
-    broker = "192.168.1.231"
+    broker = "192.168.1.235"
     topics = ["sarayu/tag1/topic1|m/s"]
     mqtt_publisher = MQTTPublisher(broker, topics)
     app.exec_()
