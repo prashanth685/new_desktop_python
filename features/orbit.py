@@ -190,7 +190,7 @@ class OrbitFeature:
         # Time-domain plots for selected channels
         for ch in sorted(channels_to_plot):
             time_plot_widget = pg.PlotWidget()
-            time_plot_widget.setFixedSize(500, 250)  # Increased size
+            time_plot_widget.setFixedSize(500, 500)  # Increased size
             self.plot_layout.addWidget(time_plot_widget)
             time_plot_item = time_plot_widget.getPlotItem()
             time_plot_item.setTitle(f"Channel {ch+1} Time Domain")

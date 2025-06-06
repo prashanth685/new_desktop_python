@@ -1,115 +1,115 @@
+import paho.mqtt.client as mqtt
+import time
 import math
 import struct
-import paho.mqtt.publish as publish
-from PyQt5.QtCore import QTimer, QObject
-from PyQt5.QtWidgets import QApplication
-import logging
+import threading
 
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
-
-
-class MQTTPublisher(QObject):
+class MQTTPublisher:
     def __init__(self, broker, topics):
-        super().__init__()
         self.broker = broker
         self.topics = topics if isinstance(topics, list) else [topics]
         self.count = 1
 
-        self.frequency = 10  # Hz
-        self.amplitude = (46537 - 16390) / 2  # Sine wave amplitude
-        self.offset = (46537 + 16390) / 2     # Sine wave offset
-        self.sample_rate = 4096               # Samples per second
-        self.time_per_message = 1.0           # 1 second for 4096 samples
-        self.current_time = 0.0
-        self.channel = 4                      # Number of channels
-        self.samples_per_channel = 4096       # Samples per channel
-        self.frame_index = 0
+        self.frequency = 10
+        amp = 3
+        self.amplitude = ((amp * 0.5) / (3.3 / 65535))
+        self.offset = 32768
 
-        self.timer = QTimer(self)
-        self.timer.timeout.connect(self.publish_message)
-        self.timer.start(1000)  # Publish every 1 second
-        logging.debug(f"Initialized MQTTPublisher with broker: {self.broker}, topics: {self.topics}")
+        self.sample_rate = 4096
+        self.time_per_message = 1.0
+        self.current_time = 0.0
+
+        self.channel = 6
+        self.main_channels = 4
+        self.frame_index = 0
+        self.timer = None
+
+        self.client = mqtt.Client()
+        self.client.on_connect = self.on_connect
+        self.client.on_publish = self.on_publish
+        self.client.on_disconnect = self.on_disconnect
+        self.client.on_log = self.on_log
+
+        self.client.connect(self.broker, 1883, 60)
+
+    def on_connect(self, client, userdata, flags, rc):
+        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - Connected to MQTT broker: {self.broker}")
+        if not self.timer:
+            self.timer = threading.Timer(1.0, self.publish_message)
+            self.timer.start()
+            print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - Publishing started")
+
+    def on_publish(self, client, userdata, mid):
+        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - Published message with mid: {mid}")
+
+    def on_disconnect(self, client, userdata, rc):
+        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - Disconnected from MQTT broker: {self.broker}")
+
+    def on_log(self, client, userdata, level, buf):
+        print(f"Log: {buf}")
 
     def publish_message(self):
-        try:
-            # Generate sine wave samples for all channels
-            all_channel_data = []
-            for i in range(self.samples_per_channel):
-                t = self.current_time + (i / self.sample_rate)
-                base_value = self.offset + self.amplitude * math.sin(2 * math.pi * self.frequency * t)
-                rounded_value = int(round(base_value))
-                all_channel_data.append(rounded_value)
+        if self.count >= 20000:
+            print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - Publishing stopped after 20000 messages")
+            self.client.disconnect()
+            return
 
-            self.current_time += self.time_per_message
+        samples_per_channel = self.sample_rate
+        all_channel_data = [[0] * samples_per_channel for _ in range(self.channel)]
 
-            # Interleave channel data (16384 = 4096 samples * 4 channels)
-            interleaved = []
-            for i in range(self.samples_per_channel):
-                for ch in range(self.channel):
-                    interleaved.append(all_channel_data[i])  # Same data for all channels
+        for i in range(samples_per_channel):
+            t = self.current_time + (i / self.sample_rate)
+            base_value = self.offset + self.amplitude * math.sin(2 * math.pi * self.frequency * t)
+            rounded_value = round(base_value)
+            for ch in range(self.main_channels):
+                all_channel_data[ch][i] = rounded_value
 
-            if len(interleaved) != 16384:
-                logging.error(f"Interleaved data length incorrect: expected 16384, got {len(interleaved)}")
-                return
+        for i in range(samples_per_channel):
+            all_channel_data[self.channel - 2][i] = self.frequency
 
-            # Generate tacho frequency data (4096 samples, same waveform)
-            tacho_freq_data = []
-            for i in range(4096):
-                t = self.current_time - self.time_per_message + (i / self.sample_rate)
-                freq_value = int(self.offset + self.amplitude * math.sin(2 * math.pi * self.frequency * t))
-                tacho_freq_data.append(freq_value)
+        interval = self.sample_rate / self.frequency
 
-            # Generate tacho trigger data using DFT-style spike (sum of harmonics)
-            tacho_trigger_data = []
-            N = self.samples_per_channel
-            num_components = 20  # Number of harmonics (more = sharper spikes)
+        for i in range(samples_per_channel):
+            all_channel_data[self.channel - 1][i] = 1 if i % round(interval) == 0 else 0
 
-            for n in range(N):
-                value = 0
-                for k in range(1, num_components + 1):
-                    value += math.cos(2 * math.pi * k * n / N)
-                # Normalize to range 0–65535
-                normalized = int(((value + num_components) / (2 * num_components)) * 65535)
-                tacho_trigger_data.append(normalized)
+        self.current_time += self.time_per_message
 
-            # Build header
-            header = [
-                self.frame_index % 65535,      # Frame index low
-                self.frame_index // 65535,     # Frame index high
-                self.channel,                  # Number of channels (4)
-                self.sample_rate,              # Sample rate
-                16,                            # Bit depth
-                self.samples_per_channel,      # Samples per channel (4096)
-                0, 0, 0, 0                     # Reserved
-            ]
+        header = [
+            self.frame_index % 65535,
+            self.frame_index // 65535,
+            self.main_channels,
+            self.sample_rate,
+            16,
+            self.sample_rate,
+            2,
+            0,
+            0,
+            0
+        ]
 
-            # Combine all data
-            message_values = header + interleaved + tacho_freq_data + tacho_trigger_data
-            total_expected = 10 + 16384 + 4096 + 4096
-            if len(message_values) != total_expected:
-                logging.error(f"Message length incorrect: expected {total_expected}, got {len(message_values)}")
-                return
+        interleaved_main = []
+        for i in range(samples_per_channel):
+            for ch in range(self.main_channels):
+                interleaved_main.append(all_channel_data[ch][i])
 
-            # Convert to binary
-            binary_message = struct.pack(f"{len(message_values)}H", *message_values)
+        message_values = header + interleaved_main + all_channel_data[self.channel - 2] + all_channel_data[self.channel - 1]
 
-            # Publish to all topics
-            for topic in self.topics:
-                try:
-                    publish.single(topic, binary_message, hostname=self.broker, qos=1)
-                    logging.info(f"[{self.count}] Published to {topic}: frame {self.frame_index}, {len(message_values)} values")
-                except Exception as e:
-                    logging.error(f"Failed to publish to {topic}: {str(e)}")
+        buffer = struct.pack(f"<{len(message_values)}H", *message_values)
 
-            self.frame_index += 1
-            self.count += 1
-        except Exception as e:
-            logging.error(f"Error in publish_message: {str(e)}")
+        for topic in self.topics:
+            self.client.publish(topic, buffer, qos=1)
 
+        print(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} - INFO - [{self.count}] Published to {topic}: frame {self.frame_index} with {len(message_values)} values")
+
+        self.frame_index += 1
+        self.count += 1
+
+        if self.timer:
+            self.timer = threading.Timer(1.0, self.publish_message)
+            self.timer.start()
 
 if __name__ == "__main__":
-    app = QApplication([])
-    broker = "192.168.1.179"
-    topics = ["sarayu/tag1/topic1|m/s"]
-    mqtt_publisher = MQTTPublisher(broker, topics)
-    app.exec_()
+    broker = '192.168.1.179'
+    topics = ['sarayu/d1/topic1']
+    publisher = MQTTPublisher(broker, topics)
+    publisher.client.loop_forever()

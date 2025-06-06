@@ -11,7 +11,8 @@ class MQTTHandler(QObject):
     data_received = pyqtSignal(str, str, list, int)  # tag_name, model_name, values, sample_rate
     connection_status = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.231", port=1883):
+    def __init__(self, db, project_name, broker="192.168.1.231"
+    "", port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
