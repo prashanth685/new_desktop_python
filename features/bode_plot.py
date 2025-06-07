@@ -1,122 +1,134 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QHBoxLayout, QComboBox, QPushButton, QTextEdit,QMessageBox
-from PyQt5.QtCore import Qt, QTimer
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-import matplotlib.pyplot as plt
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+import pyqtgraph as pg
 import numpy as np
-import logging
-
 
 class BodePlotFeature:
-    def __init__(self, parent, db, project_name):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
         self.parent = parent
         self.db = db
         self.project_name = project_name
-        self.widget = QWidget()
-        self.mqtt_tag = None
-        self.timer = QTimer(self.widget)
-        self.timer.timeout.connect(self.update_plot)
-        self.figure = plt.Figure(figsize=(10, 6))
-        self.canvas = FigureCanvas(self.figure)
+        # self.channel = int(channel) if channel is not None else None  # Convert channel to int
+        self.channel=channel
+        self.model_name = model_name
+        self.console = console
+        self.widget = None
+        self.plot_widget = None
+        self.mag_plot = None
+        self.phase_plot = None
         self.initUI()
 
     def initUI(self):
+        self.widget = QWidget()
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        header = QLabel(f"BODE PLOT FOR {self.project_name.upper()}")
-        header.setStyleSheet("color: white; font-size: 26px; font-weight: bold; padding: 8px;")
-        layout.addWidget(header, alignment=Qt.AlignCenter)
+        label = QLabel(f"Bode Plot for Model: {self.model_name}, Channel: {self.channel}")
+        layout.addWidget(label)
 
-        self.feature_widget = QWidget()
-        self.feature_layout = QVBoxLayout()
-        self.feature_widget.setLayout(self.feature_layout)
-        self.feature_widget.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        # Create and add the pyqtgraph PlotWidget
+        self.plot_widget = pg.PlotWidget()
+        layout.addWidget(self.plot_widget)
 
-        tag_layout = QHBoxLayout()
-        tag_label = QLabel("Select Tag:")
-        tag_label.setStyleSheet("color: white; font-size: 14px;")
-        self.tag_combo = QComboBox()
-        tags_data = list(self.db.tags_collection.find({"project_name": self.project_name}))
-        if not tags_data:
-            self.tag_combo.addItem("No Tags Available")
-        else:
-            for tag in tags_data:
-                self.tag_combo.addItem(tag["tag_name"])
-        self.tag_combo.setStyleSheet("background-color: #34495e; color: white; border: 1px solid #1a73e8; padding: 5px;")
-        tag_layout.addWidget(tag_label)
-        tag_layout.addWidget(self.tag_combo)
-        tag_layout.addStretch()
-        self.feature_layout.addLayout(tag_layout)
+        # Set up the plot layout with two subplots (magnitude and phase)
+        self.plot_widget.getPlotItem().hide()
+        self.vb = self.plot_widget.getViewBox()
+        self.vb.setBackgroundColor('w')  # White background
+        self.layout = pg.GraphicsLayout()
+        self.plot_widget.setCentralItem(self.layout)
 
-        button_layout = QHBoxLayout()
-        mqtt_btn = QPushButton("Start MQTT Plotting")
-        mqtt_btn.setStyleSheet("""
-            QPushButton { background-color: #f39c12; color: white; border: none; padding: 5px; border-radius: 5px; }
-            QPushButton:hover { background-color: #e67e22; }
-        """)
-        mqtt_btn.clicked.connect(self.start_mqtt_plotting)
-        button_layout.addWidget(mqtt_btn)
-        button_layout.addStretch()
-        self.feature_layout.addLayout(button_layout)
+        # Magnitude plot
+        self.mag_plot = self.layout.addPlot(row=0, col=0)
+        self.mag_plot.setTitle("Bode Plot - Magnitude")
+        self.mag_plot.setLabel('left', "Magnitude (dB)")
+        self.mag_plot.setLabel('bottom', "Frequency (Hz)")
+        self.mag_plot.setLogMode(x=True, y=False)
+        self.mag_plot.showGrid(x=True, y=True, alpha=0.3)
 
-        self.feature_layout.addWidget(self.canvas)
+        # Phase plot
+        self.layout.nextRow()
+        self.phase_plot = self.layout.addPlot(row=1, col=0)
+        self.phase_plot.setTitle("Bode Plot - Phase")
+        self.phase_plot.setLabel('left', "Phase (degrees)")
+        self.phase_plot.setLabel('bottom', "Frequency (Hz)")
+        self.phase_plot.setLogMode(x=True, y=False)
+        self.phase_plot.showGrid(x=True, y=True, alpha=0.3)
 
-        self.feature_result = QTextEdit()
-        self.feature_result.setReadOnly(True)
-        self.feature_result.setStyleSheet("background-color: #34495e; color: white; border-radius: 5px; padding: 10px;")
-        self.feature_result.setText(f"Bode Plot data for {self.project_name}: Select a tag to begin.")
-        self.feature_layout.addWidget(self.feature_result)
-
-        layout.addWidget(self.feature_widget)
-
-    def start_mqtt_plotting(self):
-        tag_name = self.tag_combo.currentText()
-        if not self.project_name or not tag_name or tag_name == "No Tags Available":
-            QMessageBox.warning(self.parent, "Error", "No project or valid tag selected for Bode Plot!")
-            return
-        self.mqtt_tag = tag_name
-        self.timer.stop()
-        self.timer.setInterval(1000)
-        self.timer.start()
-
-    def update_plot(self):
-        if not self.project_name or not self.mqtt_tag:
-            self.feature_result.setText("No project or tag selected for Bode Plot.")
-            return
-
-        data = self.db.get_tag_values(self.project_name, self.mqtt_tag)
-        if not data:
-            self.feature_result.setText(f"No MQTT data received for {self.mqtt_tag} yet.")
-            return
-
-        latest_values = data[-1]["values"]
-        fft_data = np.fft.fft(latest_values)
-        freqs = np.fft.fftfreq(len(latest_values), 0.01)
-        magnitude = 20 * np.log10(np.abs(fft_data))
-        phase = np.angle(fft_data, deg=True)
-
-        self.feature_result.setText(f"Bode Plot Data for {self.mqtt_tag}:\nLatest values count: {len(latest_values)}")
-
-        self.figure.clear()
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 6), sharex=True)
-        self.figure.add_subplot(ax1)
-        self.figure.add_subplot(ax2)
-        
-        ax1.semilogx(freqs[:len(freqs)//2], magnitude[:len(freqs)//2], 'b-')
-        ax1.set_ylabel('Magnitude (dB)')
-        ax1.set_title(f'Bode Plot for {self.mqtt_tag}')
-        ax1.grid(True)
-
-        ax2.semilogx(freqs[:len(freqs)//2], phase[:len(freqs)//2], 'b-')
-        ax2.set_xlabel('Frequency (Hz)')
-        ax2.set_ylabel('Phase (degrees)')
-        ax2.grid(True)
-
-        self.canvas.draw()
-
-    def on_data_received(self, tag_name, values):
-        if tag_name == self.mqtt_tag:
-            self.update_plot()
+        if not self.model_name and self.console:
+            self.console.append_to_console("No model selected in BodePlotFeature.")
+        if self.channel is None and self.console:
+            self.console.append_to_console("No channel selected in BodePlotFeature.")
 
     def get_widget(self):
         return self.widget
+
+    def on_data_received(self, tag_name, model_name, values, sample_rate=1000):
+        if self.model_name != model_name:
+            return  # Ignore data for other models
+
+        if self.console:
+            self.console.append_to_console(
+                f"Bode Plot ({self.model_name} - {self.channel}): Received data for {tag_name}"
+            )
+
+        try:
+            # Validate channel and values
+            if self.channel is None:
+                if self.console:
+                    self.console.append_to_console(f"No channel specified for {tag_name}")
+                return
+
+            # Convert channel to int if it isn't already
+            channel_idx = int(self.channel)
+
+            # Select the appropriate channel data
+            if isinstance(values, list) and len(values) > channel_idx >= 0:
+                x = np.array(values[channel_idx])
+            else:
+                x = np.array(values)
+                if self.console:
+                    self.console.append_to_console(f"Invalid channel index {channel_idx} for {tag_name}, using default data")
+                return
+
+            N = len(x)
+            if N == 0:
+                if self.console:
+                    self.console.append_to_console(f"No data received for {tag_name}")
+                return
+
+            # Compute FFT
+            fft_result = np.fft.fft(x)
+            frequencies = np.fft.fftfreq(N, d=1.0/sample_rate)  # Use provided sample_rate
+            frequencies = frequencies[:N//2]  # Positive frequencies only
+            fft_result = fft_result[:N//2]  # Corresponding FFT values
+
+            # Compute frequency (adjust based on sample rate)
+            frequencies = frequencies / 100.0  # Hz, following provided formula
+
+            # Compute amplitude using the formula: A = 4 * sqrt((1/N * sum(x[n] * sin(theta_n))^2 + (1/N * sum(x[n] * cos(theta_n))^2)
+            theta = 2 * np.pi * frequencies * np.arange(N)[:, None] / N
+            sin_sum = (1/N) * np.sum(x[:, None] * np.sin(theta), axis=0)
+            cos_sum = (1/N) * np.sum(x[:, None] * np.cos(theta), axis=0)
+            amplitude = 4 * np.sqrt(sin_sum**2 + cos_sum**2)
+
+            # Convert amplitude to dB for magnitude plot
+            magnitude = 20 * np.log10(np.abs(amplitude + 1e-10))  # Add small value to avoid log(0)
+
+            # Compute phase using the formula: phi = arctan2(cos_sum / sin_sum) * 180 / pi
+            phase = np.arctan2(cos_sum, sin_sum) * (180 / np.pi)
+
+            # Clear previous plots
+            self.mag_plot.clear()
+            self.phase_plot.clear()
+
+            # Plot new data
+            self.mag_plot.plot(frequencies, magnitude, pen='b')
+            self.phase_plot.plot(frequencies, phase, pen='b')
+
+            # Update plot settings
+            self.mag_plot.setTitle("Bode Plot - Magnitude")
+            self.phase_plot.setTitle("Bode Plot - Phase")
+            self.plot_widget.show()
+
+        except Exception as e:
+            if self.console:
+                self.console.append_to_console(f"Error in Bode Plot for {tag_name}: {str(e)}")

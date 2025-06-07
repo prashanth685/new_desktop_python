@@ -1,5 +1,6 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
 from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+from matplotlib.backends.backend_qt5agg import NavigationToolbar2QT as NavigationToolbar
 from matplotlib.figure import Figure
 import numpy as np
 import math
@@ -15,7 +16,7 @@ class WaterfallFeature:
         self.widget = None
 
         # Waterfall specific attributes
-        self.max_lines = 50  # Max number of lines in the waterfall
+        self.max_lines = 1  # Increased for better scrolling visibility
         self.data_history = [[] for _ in range(4)]  # Holds previous FFT magnitude lines for 4 main channels
         self.phase_history = [[] for _ in range(4)]  # Holds previous FFT phase lines for 4 main channels
         self.scaling_factor = 3.3 / 65535.0  # Scaling factor for voltage conversion
@@ -37,6 +38,10 @@ class WaterfallFeature:
         self.canvas = FigureCanvas(self.figure)
         self.ax = self.figure.add_subplot(111, projection='3d')  # 3D for waterfall
         layout.addWidget(self.canvas)
+
+        # Add Matplotlib navigation toolbar for zooming and panning
+        self.toolbar = NavigationToolbar(self.canvas, self.widget)
+        layout.addWidget(self.toolbar)
 
         if not self.model_name and self.console:
             self.console.append_to_console("No model selected in FFTViewFeature.")
@@ -73,7 +78,7 @@ class WaterfallFeature:
                 return
 
         # Apply scaling factor to channel data (convert ADC counts to volts)
-        channel_data = [np.array(ch) * self.scaling_factor for ch in channel_data]
+        channel_data = [np.array(ch, dtype=np.float32) * self.scaling_factor for ch in channel_data]
 
         # Calculate target length (next power of 2)
         sample_count = self.samples_per_channel
@@ -91,16 +96,19 @@ class WaterfallFeature:
             fft_result = np.fft.fft(padded_data)
             N = len(padded_data)
 
-            # Single-sided FFT magnitude scaled for correct amplitude peak
-            fft_magnitude = (2.0 / N) * np.abs(fft_result[:N // 2])
-            fft_magnitude[0] /= 2  # DC component no doubling
+            # Single-sided FFT magnitude scaled for correct amplitude peak (in volts)
+            half = N // 2
+            magnitudes = (2.0 / N) * np.abs(fft_result[:half])  # Scale for single-sided FFT
+            magnitudes[0] /= 2  # DC component no doubling
             if N % 2 == 0:
-                fft_magnitude[-1] /= 2  # Nyquist component no doubling if even length
+                magnitudes[-1] /= 2  # Nyquist component no doubling if even length
 
-            fft_phase = np.angle(fft_result[:N // 2], deg=True)
-            freqs = np.array([j * self.sample_rate / N for j in range(N // 2)])
+            fft_phase = np.angle(fft_result[:half], deg=True)
 
-            fft_magnitudes.append(fft_magnitude)
+            # Frequency axis: [0, Fs/N, 2*Fs/N, ..., (N/2 - 1)*Fs/N]
+            freqs = np.array([i * self.sample_rate / N for i in range(half)])
+
+            fft_magnitudes.append(magnitudes)
             fft_phases.append(fft_phase)
             frequencies.append(freqs)
 
@@ -116,26 +124,34 @@ class WaterfallFeature:
 
     def update_waterfall_plot(self, frequencies):
         self.ax.clear()
-        self.ax.set_title(f"Waterfall FFT Plot (4 Channels, Model: {self.model_name})")
+        self.ax.set_title(f"Waterfall FFT Plot (Channels, Model: {self.model_name})")
         self.ax.set_xlabel("Frequency (Hz)")
-        self.ax.set_ylabel("Time (Older to Newer)")
+        self.ax.set_ylabel("Channel")
         self.ax.set_zlabel("Amplitude (V)")
         self.ax.grid(True)
 
         colors = ['blue', 'red', 'green', 'purple']
+        max_amplitude = 0
 
         for ch in range(4):
             num_lines = len(self.data_history[ch])
             for idx, fft_line in enumerate(self.data_history[ch]):
                 x = frequencies
-                y = np.full_like(x, idx + ch * (self.max_lines + 2))  # Offset channels vertically
+                # Offset each line in time (y-axis), recent data at y=0
+                y = np.full_like(x, num_lines - idx - 1 + ch * (self.max_lines + 2))
                 z = fft_line
-                self.ax.plot(x, y, z, color=colors[ch], label=f'Channel {ch+1}' if idx == 0 else None)
+                self.ax.plot(x, y, z, color=colors[ch], label=f'Channel {ch+1}' if idx == num_lines - 1 else None)
+                max_amplitude = max(max_amplitude, np.max(z))
+
+        # Set axis limits to focus on recent data
+        self.ax.set_ylim(-1, 4 * (self.max_lines + 2))
+        self.ax.set_xlim(frequencies[0], frequencies[-1])
+        self.ax.set_zlim(0, max_amplitude * 1.1)  # Add 10% margin to z-axis
 
         self.ax.legend(loc='upper right')
         self.figure.tight_layout()
 
-        # Set 3D view angle (elevation 20°, azimuth -45°)
+        # Set 3D view angle for better visibility
         self.ax.view_init(elev=20, azim=-45)
 
         self.canvas.draw()
