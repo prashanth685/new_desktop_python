@@ -16,6 +16,7 @@ from features.tabular_view import TabularViewFeature
 from features.time_view import TimeViewFeature
 from features.fft_view import FFTViewFeature
 from features.waterfall import WaterfallFeature
+from features.centerline import CenterLineFeature
 from features.orbit import OrbitFeature
 from features.trend_view import TrendViewFeature
 from features.multi_trend import MultiTrendFeature
@@ -226,7 +227,7 @@ class DashboardWindow(QWidget):
             self.project_structure_widget = None
             logging.debug("ProjectStructureWidget removed from MainSection")
         self.load_project_features()
-        self.setup_mqtt()
+        QTimer.singleShot(0, self.setup_mqtt)  # Setup MQTT asynchronously
 
     def setup_mqtt(self):
         if not self.current_project:
@@ -250,7 +251,6 @@ class DashboardWindow(QWidget):
                 self.console.append_to_console(f"No tags found for project: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to setup MQTT: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to setup MQTT: {str(e)}")
             self.console.append_to_console(f"Failed to setup MQTT: {str(e)}")
             self.mqtt_connected = False
             self.mqtt_status_changed.emit(False)
@@ -295,27 +295,7 @@ class DashboardWindow(QWidget):
         if self.mqtt_connected:
             self.console.append_to_console("Already connected to MQTT")
             return
-        try:
-            tags = self.get_project_tags()
-            if not tags:
-                QMessageBox.warning(self, "Error", "No tags found for this project. Please create tags first!")
-                self.console.append_to_console("No tags found for project")
-                return
-            self.cleanup_mqtt()
-            self.mqtt_handler = MQTTHandler(self.db, self.current_project)
-            self.mqtt_handler.data_received.connect(self.on_data_received)
-            self.mqtt_handler.connection_status.connect(self.on_mqtt_status)
-            self.mqtt_handler.start()
-            logging.info(f"MQTT connection attempt for project: {self.current_project}")
-            self.console.append_to_console(f"MQTT connection attempt for project: {self.current_project}")
-        except Exception as e:
-            logging.error(f"Failed to connect MQTT: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to connect MQTT: {str(e)}")
-            self.console.append_to_console(f"Failed to connect MQTT: {str(e)}")
-            self.mqtt_connected = False
-            self.mqtt_status_changed.emit(False)
-            self.mqtt_status.update_mqtt_status_indicator()
-            self.sub_tool_bar.update_subtoolbar()
+        QTimer.singleShot(0, self.setup_mqtt)  # Connect asynchronously
 
     def disconnect_mqtt(self):
         if not self.mqtt_connected:
@@ -331,7 +311,6 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"MQTT disconnected for project: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to disconnect MQTT: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to disconnect MQTT: {str(e)}")
             self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
             self.mqtt_status.update_mqtt_status_indicator()
 
@@ -400,7 +379,7 @@ class DashboardWindow(QWidget):
                 self.current_project = new_project_name
                 self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
                 self.load_project_features()
-                self.setup_mqtt()
+                QTimer.singleShot(0, self.setup_mqtt)  # Setup MQTT asynchronously
                 self.tool_bar.update_toolbar()
                 self.sub_tool_bar.update_subtoolbar()
                 if self.current_feature:
@@ -546,6 +525,7 @@ class DashboardWindow(QWidget):
                 "Time Report": TimeReportFeature,
                 "FFT": FFTViewFeature,
                 "Waterfall": WaterfallFeature,
+                "Centerline": CenterLineFeature,
                 "Orbit": OrbitFeature,
                 "Trend View": TrendViewFeature,
                 "Multiple Trend View": MultiTrendFeature,

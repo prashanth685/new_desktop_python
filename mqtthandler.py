@@ -1,5 +1,5 @@
 import paho.mqtt.client as mqtt
-from PyQt5.QtCore import QObject, pyqtSignal
+from PyQt5.QtCore import QObject, pyqtSignal, QTimer
 import struct
 import json
 import logging
@@ -11,8 +11,7 @@ class MQTTHandler(QObject):
     data_received = pyqtSignal(str, str, list, int)  # tag_name, model_name, values, sample_rate
     connection_status = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.235"
-    "", port=1883):
+    def __init__(self, db, project_name, broker="192.168.1.239", port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
@@ -44,7 +43,7 @@ class MQTTHandler(QObject):
             self.connected = True
             self.connection_status.emit("Connected to MQTT Broker")
             logging.info("Connected to MQTT Broker")
-            self.subscribe_to_topics()
+            QTimer.singleShot(0, self.subscribe_to_topics)  # Subscribe asynchronously
         else:
             self.connected = False
             self.connection_status.emit(f"Connection failed with code {rc}")
@@ -104,14 +103,13 @@ class MQTTHandler(QObject):
                 # Extract header values with defaults
                 num_channels = header[2] if len(header) > 2 and header[2] > 0 else 4
                 sample_rate = header[3] if len(header) > 3 and header[3] > 0 else 4096
-                # Ignore header[5] for samples_per_channel, use fixed 4096
                 samples_per_channel = 4096
-                num_tacho_channels = header[6] if len(header) > 6 and header[6] > 0 else 2  # 1 tacho freq + 1 tacho trigger
+                num_tacho_channels = header[6] if len(header) > 6 and header[6] > 0 else 2
 
                 # Calculate expected number of data points
-                expected_main = samples_per_channel * num_channels  # 4096 * 4 = 16384
-                expected_tacho = 4096 * num_tacho_channels  # 4096 * 2 = 8192
-                expected_total = expected_main + expected_tacho  # 16384 + 8192 = 24576
+                expected_main = samples_per_channel * num_channels
+                expected_tacho = 4096 * num_tacho_channels
+                expected_total = expected_main + expected_tacho
 
                 if len(total_values) != expected_total:
                     logging.warning(f"Unexpected data length: got {len(total_values)}, expected {expected_total}")
@@ -131,10 +129,9 @@ class MQTTHandler(QObject):
 
                 # Convert to float for channels and include tacho data
                 values = [[float(v) for v in ch] for ch in channel_data]
-                values.append([float(v) for v in tacho_freq_data])  # Tacho frequency
-                values.append([float(v) for v in tacho_trigger_data])  # Tacho trigger
+                values.append([float(v) for v in tacho_freq_data])
+                values.append([float(v) for v in tacho_trigger_data])
 
-                # For debug/logging
                 logging.debug(f"Parsed binary payload:")
                 logging.debug(f" - Channels: {num_channels}")
                 logging.debug(f" - Samples/channel: {len(channel_data[0])}")
@@ -153,12 +150,13 @@ class MQTTHandler(QObject):
             project_data = self.db.get_project_data(self.project_name)
             for model_name, model_data in project_data.get("models", {}).items():
                 tag_name = model_data.get("tagName", "")
-                if tag_name:
+                if tag_name and tag_name not in self.subscribed_topics:
                     self.client.subscribe(tag_name)
                     self.subscribed_topics.append(tag_name)
                     logging.info(f"Subscribed to topic: {tag_name}")
         except Exception as e:
             logging.error(f"Error subscribing to topics: {str(e)}")
+            self.connection_status.emit(f"Failed to subscribe to topics: {str(e)}")
 
     def start(self):
         try:
@@ -166,7 +164,7 @@ class MQTTHandler(QObject):
             self.client.on_connect = self.on_connect
             self.client.on_disconnect = self.on_disconnect
             self.client.on_message = self.on_message
-            self.client.connect(self.broker, self.port, 60)
+            self.client.connect_async(self.broker, self.port, 60)  # Use async connect
             self.client.loop_start()
             logging.info("MQTT client started")
         except Exception as e:

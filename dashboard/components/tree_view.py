@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox, QWidget, QVBoxLayout
+from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox, QWidget, QVBoxLayout,QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 import logging
@@ -24,6 +24,12 @@ class TreeView(QWidget):
             QTreeWidget::item:selected { background-color: #4a90e2; color: white; }
         """)
         self.tree.setFixedWidth(300)
+        self.setFixedWidth(300)         # Fix the entire TreeView width
+        self.setMinimumWidth(300)
+        self.setMaximumWidth(300)
+        self.tree.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+
+
         self.tree.itemClicked.connect(self.handle_item_clicked)
 
         layout = QVBoxLayout()

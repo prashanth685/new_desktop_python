@@ -1,18 +1,17 @@
 from PyQt5.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTreeWidget, QTreeWidgetItem,
-    QPushButton, QTabWidget, QListWidget, QLineEdit, QLabel, QMessageBox, QListWidgetItem, QProgressDialog
+    QPushButton, QTabWidget, QListWidget, QLineEdit, QLabel, QMessageBox, QListWidgetItem
 )
 from PyQt5 import QtCore
-
-from PyQt5.QtCore import Qt, pyqtSignal, QThread, pyqtSignal as Signal, QTimer
+from PyQt5.QtCore import Qt, QTimer
 import json
 import logging
 import time
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-class DatabaseWorker(QThread):
-    data_fetched = Signal(str, dict)
+class DatabaseWorker(QtCore.QThread):
+    data_fetched = QtCore.pyqtSignal(str, dict)
 
     def __init__(self, db, project_name):
         super().__init__()
@@ -27,7 +26,7 @@ class DatabaseWorker(QThread):
             logging.error(f"Async fetch failed for '{self.project_name}': {str(e)}")
 
 class ProjectStructureWidget(QWidget):
-    project_selected = pyqtSignal(str)
+    project_selected = QtCore.pyqtSignal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -36,7 +35,7 @@ class ProjectStructureWidget(QWidget):
         self.selected_project = None
         self.project_cache = {}
         self.initUI()
-        self.load_projects()
+        QTimer.singleShot(0, self.load_projects)  # Load projects asynchronously
 
     def initUI(self):
         main_layout = QHBoxLayout(self)
@@ -103,17 +102,16 @@ class ProjectStructureWidget(QWidget):
             self.project_cache.clear()
             if not projects:
                 logging.info("No projects available.")
-                QMessageBox.information(self, "Info", "No projects available.")
+                self.parent.console.append_to_console("No projects available.")
                 return
             for project in projects:
                 if not project or not isinstance(project, str):
                     logging.warning(f"Invalid project name: {project}")
                     continue
                 item = QListWidgetItem(f"📁 {project}")
-                item.setSizeHint(QtCore.QSize(100, 40))  # Width can be left flexible, height = 40px
+                item.setSizeHint(QtCore.QSize(100, 40))
                 self.project_list.addItem(item)
                 item.setData(Qt.UserRole, project)
-                self.project_list.addItem(item)
                 try:
                     project_data = self.db.get_project_data(project)
                     self.project_cache[project] = project_data
@@ -122,7 +120,7 @@ class ProjectStructureWidget(QWidget):
             logging.debug(f"Loaded {self.project_list.count()} projects")
         except Exception as e:
             logging.error(f"Failed to load projects: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to load projects: {str(e)}")
+            self.parent.console.append_to_console(f"Failed to load projects: {str(e)}")
 
     def filter_projects(self, text):
         for index in range(self.project_list.count()):
@@ -158,8 +156,7 @@ class ProjectStructureWidget(QWidget):
             if not models:
                 self.tree_view.addTopLevelItem(QTreeWidgetItem(["No models available"]))
                 return
-            self.tree_view.setIndentation(30)  # Increase indentation for children
-
+            self.tree_view.setIndentation(30)
 
             self.tree_view.clear()
             for model_name, model_data in models.items():
@@ -178,15 +175,13 @@ class ProjectStructureWidget(QWidget):
                     channel_name = channel.get("channelName", channel.get("channel_name", "Unnamed Channel"))
                     QTreeWidgetItem(model_item, [f"📄 {channel_name}"])
 
-                # Explicitly expand this item
                 self.tree_view.expandItem(model_item)
 
         except Exception as e:
             logging.error(f"Failed to populate tree for '{project_name}': {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to load project structure: {str(e)}")
+            self.parent.console.append_to_console(f"Failed to load project structure: {str(e)}")
         finally:
             self.tree_view.blockSignals(False)
-
 
     def on_structure_item_expanded(self, item):
         if not item.data(0, Qt.UserRole).get("loaded", False):
@@ -203,19 +198,16 @@ class ProjectStructureWidget(QWidget):
         item_text = item.text(0)
         logging.debug(f"Tree view item clicked: {item_text}")
         if model_data and isinstance(model_data, dict) and "channels" in model_data:
-            QMessageBox.information(self, "Model Selected", f"Selected model: {item_text}")
+            self.parent.console.append_to_console(f"Selected model: {item_text}")
 
     def open_project(self):
         if not self.selected_project:
             logging.warning("No project selected")
-            QMessageBox.warning(self, "Error", "Please select a project to open!")
+            self.parent.console.append_to_console("Please select a project to open!")
             return
-        progress = QProgressDialog(f"Opening {self.selected_project}...", None, 0, 0, self)
-        progress.setWindowModality(Qt.WindowModal)
-        progress.show()
-        QTimer.singleShot(0, lambda: self._open_project_with_progress(progress))
+        QTimer.singleShot(0, lambda: self._open_project_async())
 
-    def _open_project_with_progress(self, progress):
+    def _open_project_async(self):
         try:
             self.open_button.setEnabled(False)
             open_dashboards = getattr(self.parent, 'open_dashboards', {})
@@ -226,7 +218,6 @@ class ProjectStructureWidget(QWidget):
             else:
                 self.project_selected.emit(self.selected_project)
         finally:
-            progress.close()
             self.open_button.setEnabled(True)
 
     def back_to_select(self):

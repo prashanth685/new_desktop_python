@@ -19,7 +19,7 @@ class Database:
 
     def connect(self):
         try:
-            self.client = MongoClient(self.connection_string)
+            self.client = MongoClient(self.connection_string, serverSelectionTimeoutMS=5000)
             self.client.server_info()  # Test connection
             self.db = self.client["changed_db"]
             self.projects_collection = self.db["projects"]
@@ -469,10 +469,3 @@ class Database:
         except Exception as e:
             logging.error(f"Error fetching distinct filenames: {str(e)}")
             return []
-
-    def get_models(self, project_name):
-        project_data = self.get_project_data(project_name)
-        if not project_data:
-            logging.error(f"Project {project_name} not found!")
-            return []
-        return list(project_data.get("models", {}).keys())
