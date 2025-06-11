@@ -1,12 +1,13 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QPushButton, QScrollArea, QDateTimeEdit, QGridLayout)
-from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, Qt, QDateTime, QRect, pyqtSignal, QEvent, QObject
+from PyQt5.QtWidgets import QApplication
+
+from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, Qt, QDateTime, QRect, pyqtSignal, QEvent, QObject, QTimer
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
 import pyqtgraph as pg
 from pyqtgraph import PlotWidget, mkPen, AxisItem, InfiniteLine, SignalProxy
 import numpy as np
 from datetime import datetime, timedelta
 import logging
-
 
 class QRangeSlider(QWidget):
     """Custom dual slider widget for selecting a time range."""
@@ -149,18 +150,16 @@ class TimeReportFeature:
         self.start_time = None
         self.end_time = None
         self.use_full_range = True
-        self.initUI()
-        self.refresh_filenames()
+        self.init_ui_deferred()
 
-    def animate_button_press(self):
-        animation = QPropertyAnimation(self.ok_button, b"styleSheet")
-        # animation.setDuration(200)
-        # animation.setStartValue("background-color: #1a73e8;")
-        # animation.setEndValue("background-color: #155ab6;")
-        animation.setEasingCurve(QEasingCurve.InOutQuad)
-        animation.start()
+    def init_ui_deferred(self):
+        """Initialize UI components immediately and defer data loading."""
+        self.setup_basic_ui()
+        # Defer heavy initialization tasks
+        QTimer.singleShot(0, self.load_data_async)
 
-    def initUI(self):
+    def setup_basic_ui(self):
+        """Set up the basic UI structure without data loading."""
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
@@ -169,7 +168,7 @@ class TimeReportFeature:
         header.setStyleSheet("color: white; font-size: 26px; font-weight: bold; padding: 8px;")
         layout.addWidget(header, alignment=Qt.AlignCenter)
 
-        # Controls container (not scrollable)
+        # Controls container
         controls_widget = QWidget()
         controls_widget.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
         controls_layout = QVBoxLayout()
@@ -180,6 +179,7 @@ class TimeReportFeature:
         file_label = QLabel(f"Select Saved File (Model: {self.model_name or 'None'}, Channel: {self.channel or 'All'}):")
         file_label.setStyleSheet("color: white; font-size: 16px; font: bold")
         self.file_combo = QComboBox()
+        self.file_combo.addItem("Loading files...")
         self.file_combo.setStyleSheet("""
             QComboBox {
                 background-color: #fdfdfd;
@@ -246,7 +246,6 @@ class TimeReportFeature:
             }
         """)
         self.ok_button.clicked.connect(self.plot_data)
-        self.ok_button.clicked.connect(self.animate_button_press)
         self.ok_button.setEnabled(False)
 
         file_layout.addWidget(file_label)
@@ -292,9 +291,9 @@ class TimeReportFeature:
 
         # Time info layout
         time_info_layout = QHBoxLayout()
-        self.start_time_label = QLabel("File Start Time: N/A")
+        self.start_time_label = QLabel("File Start Time: Loading...")
         self.start_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
-        self.stop_time_label = QLabel("File Stop Time: N/A")
+        self.stop_time_label = QLabel("File Stop Time: Loading...")
         self.stop_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
         time_info_layout.addWidget(self.start_time_label)
         time_info_layout.addWidget(self.stop_time_label)
@@ -303,10 +302,10 @@ class TimeReportFeature:
 
         layout.addWidget(controls_widget)
 
-        # Graph container with scrollbar
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet("""
+        # Placeholder for graph container
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setStyleSheet("""
             QScrollArea {
                 border-radius: 8px;
                 padding: 5px;
@@ -330,11 +329,33 @@ class TimeReportFeature:
                 background: none;
             }
         """)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
-        scroll_content.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_content.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        self.scroll_area.setWidget(self.scroll_content)
+        layout.addWidget(self.scroll_area, stretch=1)
 
-        # Create plot widgets
+        # Disable controls until data is loaded
+        self.file_combo.setEnabled(False)
+        self.start_time_edit.setEnabled(False)
+        self.end_time_edit.setEnabled(False)
+        self.time_slider.setEnabled(False)
+        self.ok_button.setEnabled(False)
+
+    def load_data_async(self):
+        """Asynchronously load data and initialize plots."""
+        try:
+            # Initialize plots
+            self.init_plots()
+            # Load filenames
+            self.refresh_filenames()
+        except Exception as e:
+            logging.error(f"Error in async data loading: {str(e)}")
+            if self.console:
+                self.console.append_to_console(f"Error loading Time Report data: {str(e)}")
+
+    def init_plots(self):
+        """Initialize plot widgets incrementally."""
         colors = ['r', 'g', 'b', 'y', 'c', 'm']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
@@ -373,21 +394,20 @@ class TimeReportFeature:
             plot_widget.viewport().installEventFilter(tracker)
             self.trackers.append(tracker)
 
-            scroll_layout.addWidget(plot_widget)
+            self.scroll_layout.addWidget(plot_widget)
+            QApplication.processEvents()  # Allow UI updates between widget creations
 
-        scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area, stretch=1)
-        self.widget.setLayout(layout)
-
-        if not self.model_name and self.console:
-            self.console.append_to_console("No model selected in TimeReportFeature.")
-        if not self.channel and self.console:
-            self.console.append_to_console("No channel selected in TimeReportFeature.")
-
-    def get_widget(self):
-        return self.widget
+    def animate_button_press(self):
+        """Animate button press effect."""
+        animation = QPropertyAnimation(self.ok_button, b"styleSheet")
+        animation.setDuration(200)
+        animation.setStartValue("background-color: #1a73e8;")
+        animation.setEndValue("background-color: #155ab6;")
+        animation.setEasingCurve(QEasingCurve.InOutQuad)
+        animation.start()
 
     def refresh_filenames(self):
+        """Refresh available filenames from the database."""
         try:
             self.filenames = self.db.get_distinct_filenames(self.project_name, self.model_name)
             self.file_combo.clear()
@@ -407,11 +427,13 @@ class TimeReportFeature:
                 self.end_time_edit.setEnabled(True)
                 self.time_slider.setEnabled(True)
                 self.ok_button.setEnabled(True)
+                self.file_combo.setEnabled(True)
                 self.update_time_labels(self.file_combo.currentText())
                 if self.console:
                     self.console.append_to_console(f"Refreshed filenames: {len(self.filenames)} found")
         except Exception as e:
             logging.error(f"Error refreshing filenames: {str(e)}")
+            self.file_combo.clear()
             self.file_combo.addItem("Error Loading Files")
             self.start_time_label.setText("File Start Time: N/A")
             self.stop_time_label.setText("File Stop Time: N/A")
@@ -423,6 +445,7 @@ class TimeReportFeature:
                 self.console.append_to_console(f"Error refreshing filenames: {str(e)}")
 
     def on_filename_selected(self, filename):
+        """Handle filename selection."""
         self.selected_filename = filename
         self.use_full_range = True
         self.update_time_labels(filename)
@@ -437,6 +460,7 @@ class TimeReportFeature:
             self.end_time = None
 
     def update_time_labels(self, filename):
+        """Update time range labels based on selected file."""
         if not filename or filename in ["No Files Available", "Error Loading Files"]:
             self.start_time_label.setText("File Start Time: N/A")
             self.stop_time_label.setText("File Stop Time: N/A")
@@ -516,6 +540,7 @@ class TimeReportFeature:
             self.file_end_time = None
 
     def update_time_from_slider(self):
+        """Update time range based on slider movement."""
         if not self.file_start_time or not self.file_end_time:
             return
 
@@ -550,6 +575,7 @@ class TimeReportFeature:
         self.validate_time_range()
 
     def validate_time_range(self):
+        """Validate the selected time range."""
         start_time = self.start_time_edit.dateTime().toPyDateTime()
         end_time = self.end_time_edit.dateTime().toPyDateTime()
 
@@ -574,6 +600,7 @@ class TimeReportFeature:
                     self.time_slider.blockSignals(False)
 
     def clear_plots(self):
+        """Clear all plots and reset data."""
         for plot in self.plots:
             plot.setData([], [])
         for widget in self.plot_widgets:
@@ -589,6 +616,7 @@ class TimeReportFeature:
         logging.debug("Cleared all plots")
 
     def plot_data(self):
+        """Plot data for the selected file and time range."""
         filename = self.file_combo.currentText()
         if not filename or filename in ["No Files Available", "Error Loading Files"]:
             self.clear_plots()
@@ -709,12 +737,6 @@ class TimeReportFeature:
                         self.plot_widgets[ch].enableAutoRange(axis='y')
                     elif ch == self.num_channels:
                         self.plot_widgets[ch].enableAutoRange(axis='y')
-                    # else:
-                    #     self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
-                    # vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
-                    # vline.setVisible(False)
-                    # self.plot_widgets[ch].addItem(vline)
-                    # self.vlines[ch] = vline
                 else:
                     if self.console:
                         self.console.append_to_console(f"No data for plot {ch} in time range")
@@ -743,15 +765,18 @@ class TimeReportFeature:
                 self.console.append_to_console(f"Error plotting data: {str(e)}")
 
     def mouse_enter(self, idx):
+        """Handle mouse entering a plot."""
         self.active_line_idx = idx
         self.vlines[idx].setVisible(True)
 
     def mouse_leave(self, idx):
+        """Handle mouse leaving a plot."""
         self.active_line_idx = None
         for vline in self.vlines:
             vline.setVisible(False)
 
     def mouse_moved(self, evt, idx):
+        """Handle mouse movement over a plot."""
         if self.active_line_idx is None:
             return
         pos = evt[0]
@@ -768,3 +793,7 @@ class TimeReportFeature:
         for vline in self.vlines:
             vline.setPos(x)
             vline.setVisible(True)
+
+    def get_widget(self):
+        """Return the main widget."""
+        return self.widget

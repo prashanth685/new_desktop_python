@@ -71,7 +71,7 @@ class ToolBar(QToolBar):
             ("Time Report", "📄", "#4db6ac", "Access Time Report Feature"),
             ("FFT", "📈", "#ba68c8", "Access FFT View Feature"),
             ("Waterfall", "🌊", "#4dd0e1", "Access Waterfall Feature"),
-            ("Center line", "📏", "#4dd0e1", "Access Centerline Feature"),     
+            ("Centerline", "📏", "#4dd0e1", "Access Centerline Feature"),     
             ("Orbit", "🪐", "#f06292", "Access Orbit Feature"),
             ("Trend View", "📉", "#aed581", "Access Trend View Feature"),
             ("Multiple Trend View", "📊", "#ff8a65", "Access Multiple Trend View Feature"),

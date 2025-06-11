@@ -30,8 +30,7 @@ class WaterfallFeature:
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        label = QLabel(f"FFT Waterfall Plot for Model: {self.model_name}, Channels: 1-4")
-        layout.addWidget(label)
+
 
         # Matplotlib figure
         self.figure = Figure(figsize=(8, 6))

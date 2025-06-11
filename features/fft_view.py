@@ -37,9 +37,9 @@ class FFTViewFeature:
         main_layout = QVBoxLayout()
         self.widget.setLayout(main_layout)
 
-        label = QLabel(f"FFT View for Model: {self.model_name or 'Unknown'}, Channel: {self.channel or 'Unknown'}")
-        label.setStyleSheet("color: #ecf0f1; font-size: 16px; padding: 10px;")
-        main_layout.addWidget(label)
+        # label = QLabel(f"FFT View for Model: {self.model_name or 'Unknown'}, Channel: {self.channel or 'Unknown'}")
+        # label.setStyleSheet("color: #ecf0f1; font-size: 16px; padding: 10px;")
+        # main_layout.addWidget(label)
 
         plot_layout = QHBoxLayout() if self.layout_type == "horizontal" else QVBoxLayout()
         pg.setConfigOptions(antialias=False)
