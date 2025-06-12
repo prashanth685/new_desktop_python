@@ -1,9 +1,11 @@
 from PyQt5.QtWidgets import (
-    QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QComboBox,
+    QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QLineEdit,
     QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
 )
 from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtGui import QIcon
+import logging
+import re
 
 class LayoutSelectionDialog(QDialog):
     def __init__(self, parent=None, current_layout=None):
@@ -74,14 +76,14 @@ class SubToolBar(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.selected_layout = "2x2"  # Default layout
-        self.filename_combo = None
+        self.filename_edit = None
         self.initUI()
         # Connect signal with error handling
         try:
             self.parent.mqtt_status_changed.connect(self.update_subtoolbar)
-            print("SubToolBar: mqtt_status_changed signal connected successfully")
+            logging.info("SubToolBar: mqtt_status_changed signal connected successfully")
         except AttributeError as e:
-            print(f"SubToolBar: Failed to connect mqtt_status_changed signal: {e}")
+            logging.error(f"SubToolBar: Failed to connect mqtt_status_changed signal: {e}")
 
     def initUI(self):
         self.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eceff1, stop:1 #cfd8dc);")
@@ -96,7 +98,7 @@ class SubToolBar(QWidget):
         self.update_subtoolbar()
 
     def update_subtoolbar(self):
-        print(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")
+        logging.debug(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")
         self.toolbar.clear()
         self.toolbar.setStyleSheet("""
             QToolBar { border: none; padding: 5px; spacing: 10px; }
@@ -110,9 +112,9 @@ class SubToolBar(QWidget):
         self.toolbar.setMovable(False)
         self.toolbar.setFloatable(False)
 
-        self.filename_combo = QComboBox()
-        self.filename_combo.setStyleSheet("""
-            QComboBox {
+        self.filename_edit = QLineEdit()
+        self.filename_edit.setStyleSheet("""
+            QLineEdit {
                 background-color: #ffffff;
                 color: #212121;
                 border: 1px solid #90caf9;
@@ -123,42 +125,26 @@ class SubToolBar(QWidget):
                 min-width: 200px;
                 max-width: 250px;
             }
-            QComboBox:hover {
+            QLineEdit:hover {
                 border: 1px solid #42a5f5;
                 background-color: #f5faff;
             }
-            QComboBox:focus {
+            QLineEdit:focus {
                 border: 1px solid #1e88e5;
                 background-color: #ffffff;
             }
-            QComboBox::drop-down {
-                width: 25px;
-                border-left: 1px solid #e0e0e0;
-                background-color: #e3f2fd;
-                border-top-right-radius: 4px;
-                border-bottom-right-radius: 4px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #ffffff;
-                border: 1px solid #90caf9;
-                border-radius: 4px;
-                padding: 3px;
-                selection-background-color: #e3f2fd;
-                selection-color: #0d47a1;
-                font-size: 14px;
-                outline: 0;
-            }
-            QComboBox::item {
-                padding: 4px 6px;
-            }
-            QComboBox::item:selected {
-                background-color: #bbdefb;
-                color: #0d47a1;
+            QLineEdit[readOnly="true"] {
+                background-color: #e0e0e0;
+                color: #616161;
+                border: 1px solid #b0bec5;
             }
         """)
-        self.filename_combo.setEnabled(self.parent.current_feature == "Time View")
-        self.refresh_filenames()
-        self.toolbar.addWidget(self.filename_combo)
+        # Enable editing only for Time View
+        is_time_view = self.parent.current_feature == "Time View"
+        self.filename_edit.setReadOnly(not is_time_view)
+        self.filename_edit.setEnabled(True)  # Always enabled to show filename
+        self.refresh_filename()
+        self.toolbar.addWidget(self.filename_edit)
         self.toolbar.addSeparator()
 
         def add_action(text_icon, color, callback, tooltip, enabled, background_color):
@@ -190,9 +176,9 @@ class SubToolBar(QWidget):
                         color: #b0bec5;
                     }}
                 """)
-                print(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")
+                logging.debug(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")
 
-        is_time_view = self.parent.current_feature == "Time View"
+        # Enable save/stop actions only for Time View
         add_action("▶", "#ffffff", self.parent.start_saving, "Start Saving Data (Time View)", is_time_view and not self.parent.is_saving, "#43a047")
         add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data (Time View)", is_time_view and self.parent.is_saving, "#90a4ae")
         self.toolbar.addSeparator()
@@ -230,36 +216,57 @@ class SubToolBar(QWidget):
 
         self.toolbar.repaint()
         self.repaint()
-        print("SubToolBar: Toolbar updated and repainted")
+        logging.debug("SubToolBar: Toolbar updated and repainted")
 
-    def refresh_filenames(self):
-        """Refresh the QComboBox with filenames from the database and the current filename being saved."""
-        if not self.filename_combo:
+    def refresh_filename(self):
+        """Refresh the QLineEdit with the current or next filename."""
+        if not self.filename_edit:
+            logging.warning("SubToolBar: No filename_edit initialized")
             return
-        self.filename_combo.clear()
-        if self.parent.current_feature == "Time View" and hasattr(self.parent.current_widget, 'refresh_filenames'):
-            # Get existing filenames from the database
-            filenames = self.parent.current_widget.refresh_filenames()
-            for filename in filenames:
-                self.filename_combo.addItem(filename)
-            
-            # Get the current filename and counter from TimeViewFeature
-            current_filename = getattr(self.parent.current_widget, 'current_filename', None)
-            filename_counter = getattr(self.parent.current_widget, 'filename_counter', 1)
-            
-            # If currently saving, ensure the current filename is included
-            if current_filename and self.parent.current_widget.is_saving:
-                if current_filename not in filenames:
-                    self.filename_combo.addItem(current_filename)
-                self.filename_combo.setCurrentText(current_filename)
-            else:
-                # Add the next filename (dataX) based on the counter
-                next_filename = f"data{filename_counter}"
-                self.filename_combo.addItem(next_filename)
-                self.filename_combo.setCurrentText(next_filename)
 
-            print(f"SubToolBar: Refreshed filenames, current: {self.filename_combo.currentText()}, "
-                  f"saving: {self.parent.current_widget.is_saving}, counter: {filename_counter}")
+        try:
+            # Default filename
+            next_filename = "data1"
+            current_filename = None
+            filename_counter = 1
+            is_saving = False
+
+            # Check if in Time View and current_widget exists
+            if self.parent.current_feature == "Time View" and hasattr(self.parent, 'current_widget'):
+                # Get current_filename and filename_counter from TimeViewFeature
+                current_filename = getattr(self.parent.current_widget, 'current_filename', None)
+                filename_counter = getattr(self.parent.current_widget, 'filename_counter', 1)
+                is_saving = getattr(self.parent.current_widget, 'is_saving', False)
+
+            # Query database for existing filenames
+            model_name = getattr(self.parent.current_widget, 'model_name', None) if hasattr(self.parent, 'current_widget') else None
+            filenames = self.parent.db.get_distinct_filenames(self.parent.current_project, model_name) if self.parent.current_project else []
+            logging.debug(f"SubToolBar: Retrieved {len(filenames)} filenames from database: {filenames}")
+
+            # Determine the next filename based on existing filenames
+            if filenames:
+                numbers = [int(re.match(r"data(\d+)", f).group(1)) for f in filenames if re.match(r"data(\d+)", f)]
+                filename_counter = max(numbers, default=0) + 1 if numbers else 1
+                next_filename = f"data{filename_counter}"
+            else:
+                next_filename = f"data{filename_counter}"
+
+            # Set the filename in QLineEdit
+            if is_saving and current_filename:
+                self.filename_edit.setText(current_filename)
+                logging.debug(f"SubToolBar: Set filename_edit to current_filename: {current_filename}")
+            else:
+                self.filename_edit.setText(next_filename)
+                logging.debug(f"SubToolBar: Set filename_edit to next_filename: {next_filename}")
+
+            logging.info(f"SubToolBar: Refreshed filename, current: {self.filename_edit.text()}, "
+                         f"saving: {is_saving}, counter: {filename_counter}")
+            self.filename_edit.repaint()
+
+        except Exception as e:
+            logging.error(f"SubToolBar: Error refreshing filename: {e}")
+            self.filename_edit.setText(f"data{filename_counter}")
+            self.filename_edit.repaint()
 
     def show_layout_menu(self):
         dialog = LayoutSelectionDialog(self, current_layout=self.selected_layout)
