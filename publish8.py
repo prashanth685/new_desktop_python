@@ -76,10 +76,12 @@ class MQTTPublisher(QObject):
                 self.num_tacho_channels,   # Number of tacho channels (2)
                 0, 0, 0                   # Reserved
             ]
+            while len(header) < 100:
+                header.append(0)
 
             # Combine all data
             message_values = header + interleaved + tacho_freq_data + tacho_trigger_data
-            total_expected = 10 + (self.samples_per_channel * self.num_channels) + (self.samples_per_channel * self.num_tacho_channels)
+            total_expected = 100 + (self.samples_per_channel * self.num_channels) + (self.samples_per_channel * self.num_tacho_channels)
             if len(message_values) != total_expected:
                 logging.error(f"Message length incorrect: expected {total_expected}, got {len(message_values)}")
                 return

@@ -11,7 +11,7 @@ class MQTTHandler(QObject):
     data_received = pyqtSignal(str, str, list, int)  # tag_name, model_name, values, sample_rate
     connection_status = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.231", port=1883):
+    def __init__(self, db, project_name, broker="192.168.1.239", port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
@@ -97,8 +97,8 @@ class MQTTHandler(QObject):
                     return
 
                 # Header: first 10 values
-                header = values[:10]
-                total_values = values[10:]
+                header = values[:100]
+                total_values = values[100:]
 
                 # Extract header values with defaults
                 num_channels = header[2] if len(header) > 2 and header[2] > 0 else 4
