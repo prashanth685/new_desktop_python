@@ -5,6 +5,7 @@ import logging
 import re
 
 class Database:
+    # mongodb+srv://prashanthsolur112:<db_password>@cluster0.dajojjb.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0
     def __init__(self, connection_string="mongodb://localhost:27017/", email="user@example.com"):
         self.connection_string = connection_string
         self.email = email

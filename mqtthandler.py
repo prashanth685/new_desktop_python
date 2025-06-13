@@ -11,7 +11,7 @@ class MQTTHandler(QObject):
     data_received = pyqtSignal(str, str, list, int)  # tag_name, model_name, values, sample_rate
     connection_status = pyqtSignal(str)
 
-    def __init__(self, db, project_name, broker="192.168.1.239", port=1883):
+    def __init__(self, db, project_name, broker="192.168.1.231", port=1883):
         super().__init__()
         self.db = db
         self.project_name = project_name
@@ -96,7 +96,7 @@ class MQTTHandler(QObject):
                     logging.warning(f"Payload too short: {len(values)} samples")
                     return
 
-                # Header: first 10 values
+                # Header: first 100 values
                 header = values[:100]
                 total_values = values[100:]
 
@@ -110,6 +110,7 @@ class MQTTHandler(QObject):
                 expected_main = samples_per_channel * num_channels
                 expected_tacho = 4096 * num_tacho_channels
                 expected_total = expected_main + expected_tacho
+                logging.debug(f" total values comming {expected_total}") 
 
                 if len(total_values) != expected_total:
                     logging.warning(f"Unexpected data length: got {len(total_values)}, expected {expected_total}")

@@ -86,6 +86,8 @@ class MQTTPublisher:
             0,
             0
         ]
+        while len(header) < 100:
+            header.append(0)
 
         interleaved_main = []
         for i in range(samples_per_channel):
@@ -109,7 +111,7 @@ class MQTTPublisher:
             self.timer.start()
 
 if __name__ == "__main__":
-    broker = '192.168.1.235'
+    broker = '192.168.1.239'
     topics = ['sarayu/d1/topic1']
     publisher = MQTTPublisher(broker, topics)
     publisher.client.loop_forever()
