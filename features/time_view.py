@@ -13,9 +13,9 @@ class TimeAxisItem(AxisItem):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    def tickStrings(self, values, scale, spacing):
-        """Convert timestamps to 'YYYY-MM-DD\nHH:MM:SS' format."""
-        return [datetime.fromtimestamp(v).strftime('%Y-%m-%d\n%H:%M:%S') for v in values]
+    # def tickStrings(self, values, scale, spacing):
+    #     """Convert timestamps to 'YYYY-MM-DD\nHH:MM:SS' format."""
+    #     return [datetime.fromtimestamp(v).strftime('%Y-%m-%d\n%H:%M:%S') for v in values]
 
 class MouseTracker(QObject):
     """Event filter to track mouse enter/leave on plot viewport."""
@@ -109,7 +109,7 @@ class TimeViewFeature:
             else:
                 plot_widget.setLabel('left', 'Tacho Trigger')
                 plot_widget.setYRange(-0.5, 1.5, padding=0)
-            plot_widget.setLabel('bottom', 'Time')
+            # plot_widget.setLabel('bottom', 'Time')
             plot_widget.showGrid(x=True, y=True)
             plot_widget.addLegend()
             pen = mkPen(color=colors[i % len(colors)], width=2)
@@ -211,131 +211,7 @@ class TimeViewFeature:
         except AttributeError:
             logging.warning("No sub_tool_bar found to refresh filenames")
             
-    # def on_data_received(self, tag_name, model_name, values, sample_rate):
-    #     """Handle incoming MQTT data, update plots, and save to database if saving is enabled."""
-    #     logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "
-    #                  f"values_len={len(values) if values else 0}, sample_rate={sample_rate}")
-    #     if self.model_name != model_name:
-    #         logging.debug(f"Ignoring data for model {model_name}, expected {self.model_name}")
-    #         return
-    #     try:
-    #         if not values or len(values) != 6:
-    #             logging.warning(f"Received incorrect number of sublists: {len(values)}, expected 6")
-    #             if self.console:
-    #                 self.console.append_to_console(f"Received incorrect number of sublists: {len(values)}")
-    #             return
-
-    #         self.sample_rate = sample_rate
-    #         self.channel_samples = 4096
-    #         self.tacho_samples = 4096
-
-    #         for ch in range(self.num_channels):
-    #             if len(values[ch]) != self.channel_samples:
-    #                 logging.warning(f"Channel {ch+1} has {len(values[ch])} samples, expected {self.channel_samples}")
-    #                 if self.console:
-    #                     self.console.append_to_console(f"Channel {ch+1} sample mismatch: {len(values[ch])}")
-    #                 return
-
-    #         tacho_freq_samples = len(values[4])
-    #         tacho_trigger_samples = len(values[5])
-    #         if tacho_freq_samples != self.tacho_samples or tacho_trigger_samples != self.tacho_samples:
-    #             logging.warning(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}, expected={self.tacho_samples}")
-    #             if self.console:
-    #                 self.console.append_to_console(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}")
-    #             return
-
-    #         current_time = time.time()
-    #         channel_time_step = 1.0 / sample_rate
-    #         tacho_time_step = 1.0 / sample_rate
-    #         self.channel_times = np.array([current_time - (self.channel_samples - 1) * channel_time_step + i * channel_time_step for i in range(self.channel_samples)])
-    #         self.tacho_times = np.array([current_time - (self.tacho_samples - 1) * tacho_time_step + i * tacho_time_step for i in range(self.tacho_samples)])
-
-    #         for ch in range(self.num_channels):
-    #             self.data[ch] = np.array(values[ch][:self.channel_samples])
-    #             logging.debug(f"Channel {ch+1} data: {len(self.data[ch])} samples")
-
-    #         self.data[self.num_channels] = np.array(values[4][:self.tacho_samples])
-    #         self.data[self.num_channels + 1] = np.array(values[5][:self.tacho_samples])
-    #         logging.debug(f"Tacho freq data: {len(self.data[self.num_channels])} samples")
-    #         logging.debug(f"Tacho trigger data: {len(self.data[self.num_channels + 1])} samples, first 10: {self.data[self.num_channels + 1][:10]}")
-
-    #         for ch in range(self.num_plots):
-    #             times = self.tacho_times if ch >= self.num_channels else self.channel_times
-    #             if ch < len(self.data) and len(self.data[ch]) > 0 and len(times) > 0:
-    #                 self.plots[ch].setData(times, self.data[ch])
-    #                 self.plot_widgets[ch].setXRange(times[0], times[-1], padding=0)
-    #                 if ch < self.num_channels:
-    #                     self.plot_widgets[ch].enableAutoRange(axis='y')
-    #                 elif ch == self.num_channels:
-    #                     self.plot_widgets[ch].enableAutoRange(axis='y')
-    #                 else:
-    #                     self.plot_widgets[ch].setYRange(0, 1.0, padding=0)
-    #             else:
-    #                 logging.warning(f"No data for plot {ch}, data_len={len(self.data[ch])}, times_len={len(times)}")
-    #                 if self.console:
-    #                     self.console.append_to_console(f"No data for plot {ch}")
-
-    #         if len(self.data[self.num_channels + 1]) > 0:
-    #             if self.trigger_lines:
-    #                 for line in self.trigger_lines:
-    #                     if line:
-    #                         self.plot_widgets[self.num_plots - 1].removeItem(line)
-    #             self.trigger_lines = []
-
-    #             trigger_indices = np.where(self.data[self.num_plots - 1] == 1)[0]
-    #             logging.debug(f"Tacho trigger indices (value=1): {len(trigger_indices)} points")
-    #             for idx in trigger_indices:
-    #                 if idx < len(self.tacho_times):
-    #                     line = InfiniteLine(
-    #                         pos=self.tacho_times[idx],
-    #                         angle=90,
-    #                         movable=False,
-    #                         pen=mkPen('k', width=2, style=Qt.SolidLine)
-    #                     )
-    #                     self.plot_widgets[self.num_plots - 1].addItem(line)
-    #                     self.trigger_lines.append(line)
-
-    #         # Save data to database if saving is enabled
-    #         if self.is_saving:
-    #             try:
-    #                 message_data = {
-    #                     "topic": tag_name,
-    #                     "filename": self.current_filename,
-    #                     "frameIndex": 0,  # Assuming a single frame for simplicity
-    #                     "message": {
-    #                         "channel_data": [list(self.data[i]) for i in range(self.num_channels)],
-    #                         "tacho_freq": list(self.data[self.num_channels]),
-    #                         "tacho_trigger": list(self.data[self.num_channels + 1])
-    #                     },
-    #                     "numberOfChannels": self.num_channels,
-    #                     "samplingRate": self.sample_rate,
-    #                     "samplingSize": self.channel_samples,
-    #                     "messageFrequency": None,
-    #                     "createdAt": datetime.now().isoformat()
-    #                 }
-    #                 success, msg = self.db.save_timeview_message(self.project_name, self.model_name, message_data)
-    #                 if success:
-    #                     logging.info(f"Saved data to database: {self.current_filename}")
-    #                     if self.console:
-    #                         self.console.append_to_console(f"Saved data to {self.current_filename}")
-    #                 else:
-    #                     logging.error(f"Failed to save data: {msg}")
-    #                     if self.console:
-    #                         self.console.append_to_console(f"Failed to save data: {msg}")
-    #             except Exception as e:
-    #                 logging.error(f"Error saving data to database: {str(e)}")
-    #                 if self.console:
-    #                     self.console.append_to_console(f"Error saving data: {str(e)}")
-
-    #         logging.debug(f"Updated {self.num_plots} plots: {self.channel_samples} channel samples, {self.tacho_samples} tacho samples")
-    #         if self.console:
-    #             self.console.append_to_console(
-    #                 f"Time View ({self.model_name}): Updated {self.num_plots} plots with {self.channel_samples} channel samples, {self.tacho_samples} tacho samples"
-    #             )
-    #     except Exception as e:
-    #         logging.error(f"Error updating plots: {str(e)}")
-    #         if self.console:
-    #             self.console.append_to_console(f"Error updating plots: {str(e)}")
+    
     def on_data_received(self, tag_name, model_name, values, sample_rate):
         """Handle incoming MQTT data, update plots, and save to database if saving is enabled."""
         logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "
@@ -381,7 +257,7 @@ class TimeViewFeature:
                 logging.debug(f"Channel {ch+1} data: {len(self.data[ch])} samples, scaled with factor {self.scaling_factor}")
 
             # Assign tacho data without scaling
-            self.data[self.num_channels] = np.array(values[4][:self.tacho_samples])
+            self.data[self.num_channels] = np.array(values[4][:self.tacho_samples]) / 100
             self.data[self.num_channels + 1] = np.array(values[5][:self.tacho_samples])
             logging.debug(f"Tacho freq data: {len(self.data[self.num_channels])} samples")
             logging.debug(f"Tacho trigger data: {len(self.data[self.num_channels + 1])} samples, first 10: {self.data[self.num_channels + 1][:10]}")

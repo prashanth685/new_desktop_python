@@ -142,7 +142,7 @@ class DashboardWindow(QWidget):
         self.main_splitter.addWidget(self.tree_view)
 
         right_container = QWidget()
-        right_container.setStyleSheet("background-color: #263238;")
+        right_container.setStyleSheet("background-color: #2E3440;")
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)

@@ -18,7 +18,7 @@ class TreeView(QWidget):
         self.tree = QTreeWidget()
         self.tree.header().hide()
         self.tree.setStyleSheet("""
-            QTreeWidget { background-color: #1e2937; color: #ecf0f1; border: none; font-size: 16px; }
+            QTreeWidget { background-color: #232629; color: #ecf0f1; border: none; font-size: 16px; }
             QTreeWidget::item { padding: 8px; border-bottom: 1px solid #2c3e50; }
             QTreeWidget::item:hover { background-color: #34495e; }
             QTreeWidget::item:selected { background-color: #4a90e2; color: white; }

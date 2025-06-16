@@ -11,7 +11,7 @@ class FileBar(QToolBar):
     def initUI(self):
         self.setStyleSheet("""
             QToolBar {
-                background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f5f5f5, stop:1 #e0e0e0);
+                background: #2D2F33;
                 border: none;
                 padding: 0;
                 spacing: 5px;
@@ -19,7 +19,7 @@ class FileBar(QToolBar):
             QToolBar QToolButton {
                 font-size: 18px;
                 font-weight: bold;
-                color: #333;
+                color: #fff;
                 padding: 8px 12px;
                 border-radius: 4px;
                 background-color: transparent;

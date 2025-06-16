@@ -1,112 +1,304 @@
+# from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
+# from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
+# from matplotlib.figure import Figure
+# import numpy as np
+
+# class CenterLineFeature:
+#     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
+#         self.parent = parent
+#         self.db = db
+#         self.project_name = project_name
+#         self.channel = channel
+#         self.model_name = model_name
+#         self.console = console
+#         self.widget = None
+#         self.figure = None
+#         self.canvas = None
+#         self.ax = None
+#         self.scaling_factor = 3.3 / 65535.0  # Scaling factor for voltage conversion
+#         self.sample_rate = 4096  # Default sample rate from publish.py
+#         self.initUI()
+
+#     def initUI(self):
+#         self.widget = QWidget()
+#         layout = QVBoxLayout()
+#         self.widget.setLayout(layout)
+
+#         label = QLabel(f"Centerline Plot for Model: {self.model_name}, Channel: {self.channel}")
+#         layout.addWidget(label)
+
+#         # Matplotlib figure and canvas setup
+#         self.figure = Figure(figsize=(10, 8))
+#         self.canvas = FigureCanvas(self.figure)
+#         self.ax = self.figure.add_subplot(111)
+#         layout.addWidget(self.canvas)
+
+#         # Console messages
+#         if not self.model_name and self.console:
+#             self.console.append_to_console("No model selected in CenterLineFeature.")
+#         if self.channel is None and self.console:
+#             self.console.append_to_console("No channel selected in CenterLineFeature.")
+
+#     def get_widget(self):
+#         return self.widget
+
+#     def on_data_received(self, tag_name, model_name, values, sample_rate):
+#         if self.model_name != model_name:
+#             if self.console:
+#                 self.console.append_to_console(f"Ignoring data for model {model_name}, expected {self.model_name}")
+#             return  # Ignore data for other models
+
+#         if self.console:
+#             self.console.append_to_console(
+#                 f"Centerline View ({self.model_name} - {self.channel}): Received data for {tag_name} - {len(values)} channels"
+#             )
+
+#         # Validate inputs
+#         if self.channel is None or not isinstance(self.channel, int):
+#             if self.console:
+#                 self.console.append_to_console(f"Invalid channel index: {self.channel}")
+#             return
+#         if not values or self.channel >= len(values) or not values[self.channel]:
+#             if self.console:
+#                 self.console.append_to_console(f"No valid data for channel {self.channel}")
+#             return
+#         if not isinstance(sample_rate, (int, float)) or sample_rate <= 0:
+#             if self.console:
+#                 self.console.append_to_console(f"Invalid sample rate: {sample_rate}, using default {self.sample_rate}")
+#             sample_rate = self.sample_rate
+
+#         try:
+#             # Extract the specified channel's data
+#             channel_data = values[self.channel]
+
+#             # Convert to voltage
+#             voltage_data = [(v - 32768) * self.scaling_factor for v in channel_data]
+
+#             # Calculate centerline (mean)
+#             mean = np.mean(voltage_data)
+
+#             # Calculate standard deviation for UCL/LCL
+#             std = np.std(voltage_data)
+#             ucl = mean + 3 * std
+#             lcl = mean - 3 * std
+
+#             # Generate time axis
+#             time = np.arange(len(voltage_data)) / sample_rate
+
+#             # Plot the data
+#             self.ax.clear()
+#             self.ax.plot(time, voltage_data, label=f"Channel {self.channel} ({tag_name})", color='blue')
+#             self.ax.axhline(y=mean, color='green', linestyle='--', label=f'Centerline (Mean = {mean:.2f} V)')
+#             self.ax.axhline(y=ucl, color='red', linestyle='--', label=f'UCL = {ucl:.2f} V')
+#             self.ax.axhline(y=lcl, color='red', linestyle='--', label=f'LCL = {lcl:.2f} V')
+#             self.ax.set_title(f"Centerline Control Chart - Model: {self.model_name}, Channel: {self.channel}")
+#             self.ax.set_xlabel("Time (s)")
+#             self.ax.set_ylabel("Voltage (V)")
+#             self.ax.legend()
+#             self.ax.grid(True)
+
+#             # Ensure the canvas is updated
+#             self.canvas.draw()
+#             self.canvas.flush_events()
+
+#             if self.console:
+#                 self.console.append_to_console(
+#                     f"Plotted channel {self.channel}: Mean={mean:.2f} V, UCL={ucl:.2f} V, LCL={lcl:.2f} V"
+#                 )
+
+#         except Exception as e:
+#             if self.console:
+#                 self.console.append_to_console(f"Error plotting data: {str(e)}")
+#             return
+
+
+
+
+
+
+
+
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel
-from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
-from matplotlib.figure import Figure
+from PyQt5.QtCore import QTimer
+import pyqtgraph as pg
 import numpy as np
+import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class CenterLineFeature:
-    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, scaling_multiplier=1.0):
         self.parent = parent
         self.db = db
         self.project_name = project_name
-        self.channel = channel
+        self.channel = channel  
         self.model_name = model_name
         self.console = console
         self.widget = None
-        self.figure = None
-        self.canvas = None
-        self.ax = None
-        self.scaling_factor = 3.3 / 65535.0  # Scaling factor for voltage conversion
-        self.sample_rate = 4096  # Default sample rate from publish.py
+        self.plot_widget = None
+        self.plot_item = None
+        self.mean_line = None
+        self.ucl_line = None
+        self.lcl_line = None
+        self.scaling_factor = (3.3 / 65535.0)  # Adjusted scaling factor
+        self.sample_rate = 4096  # Default sample rate
+        self.channel_index = None
+        self.latest_data = None
+        self.max_samples = 4096
+        self.update_timer = QTimer()
+        self.update_timer.timeout.connect(self.update_plot)
+        self.update_interval = 200  # ms
         self.initUI()
+        self.cache_channel_index()
+        logging.debug(f"Initialized CenterLineFeature with project_name: {project_name}, model_name: {model_name}, channel: {channel}, scaling_factor: {self.scaling_factor}")
 
     def initUI(self):
         self.widget = QWidget()
-        layout = QVBoxLayout()
-        self.widget.setLayout(layout)
+        main_layout = QVBoxLayout()
+        self.widget.setLayout(main_layout)
 
-        label = QLabel(f"Centerline Plot for Model: {self.model_name}, Channel: {self.channel}")
-        layout.addWidget(label)
+        label = QLabel(f"Centerline Plot for Model: {self.model_name or 'Unknown'}, Channel: {self.channel or 'Unknown'}")
+        label.setStyleSheet("color: #ecf0f1; font-size: 16px; padding: 10px;")
+        main_layout.addWidget(label)
 
-        # Matplotlib figure and canvas setup
-        self.figure = Figure(figsize=(10, 8))
-        self.canvas = FigureCanvas(self.figure)
-        self.ax = self.figure.add_subplot(111)
-        layout.addWidget(self.canvas)
+        # Plot setup using pyqtgraph
+        pg.setConfigOptions(antialias=False)
+        self.plot_widget = pg.PlotWidget()
+        self.plot_widget.setBackground("white")
+        self.plot_widget.setTitle("Centerline Control Chart", color="black", size="12pt")
+        self.plot_widget.setLabel('left', 'Voltage (V)', color='#000000')
+        self.plot_widget.setLabel('bottom', 'Time (s)', color='#000000')
+        self.plot_widget.showGrid(x=True, y=True)
+        self.plot_item = self.plot_widget.plot(pen=pg.mkPen(color='#4a90e2', width=2), name="Channel Data")
+        # Initialize horizontal lines for mean, UCL, and LCL
+        self.mean_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(color='#28a745', style=pg.QtCore.Qt.DashLine, width=2), label="Centerline")
+        self.ucl_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(color='#e74c3c', style=pg.QtCore.Qt.DashLine, width=2), label="UCL")
+        self.lcl_line = pg.InfiniteLine(pos=0, angle=0, pen=pg.mkPen(color='#e74c3c', style=pg.QtCore.Qt.DashLine, width=2), label="LCL")
+        self.plot_widget.addItem(self.mean_line)
+        self.plot_widget.addItem(self.ucl_line)
+        self.plot_widget.addItem(self.lcl_line)
+        # Enable legend
+        self.plot_widget.addLegend()
+        main_layout.addWidget(self.plot_widget)
 
-        # Console messages
-        if not self.model_name and self.console:
-            self.console.append_to_console("No model selected in CenterLineFeature.")
-        if self.channel is None and self.console:
-            self.console.append_to_console("No channel selected in CenterLineFeature.")
+        self.update_timer.start(self.update_interval)
+
+    def cache_channel_index(self):
+        try:
+            project_data = self.db.get_project_data(self.project_name)
+            if project_data and "models" in project_data and self.model_name in project_data["models"]:
+                channels = project_data["models"][self.model_name].get("channels", [])
+                for idx, ch in enumerate(channels):
+                    if ch.get("tag_name") == self.channel or ch.get("channel_name") == self.channel:
+                        self.channel_index = idx
+                        return
+            # Default to channel 0 if not found
+            self.channel_index = 0
+            logging.debug(f"Channel index not found in database, defaulting to {self.channel_index}")
+        except Exception as e:
+            logging.error(f"Error caching channel index: {e}")
+            if self.console:
+                self.console.append_to_console(f"Error caching channel index: {e}")
+            self.channel_index = 0
 
     def get_widget(self):
         return self.widget
 
     def on_data_received(self, tag_name, model_name, values, sample_rate):
+        # Validate model match
         if self.model_name != model_name:
             if self.console:
                 self.console.append_to_console(f"Ignoring data for model {model_name}, expected {self.model_name}")
-            return  # Ignore data for other models
+            logging.debug(f"Ignoring data for model {model_name}, expected {self.model_name}")
+            return
 
         if self.console:
             self.console.append_to_console(
                 f"Centerline View ({self.model_name} - {self.channel}): Received data for {tag_name} - {len(values)} channels"
             )
+            logging.debug(f"Received data for {tag_name}: {len(values)} channels, sample_rate={sample_rate}")
 
         # Validate inputs
-        if self.channel is None or not isinstance(self.channel, int):
+        if self.channel is None:
             if self.console:
-                self.console.append_to_console(f"Invalid channel index: {self.channel}")
+                self.console.append_to_console("No channel (tag_name) selected for plotting")
+            logging.error("No channel (tag_name) selected for plotting")
             return
-        if not values or self.channel >= len(values) or not values[self.channel]:
+
+        # Ensure the tag_name matches
+        if self.channel != tag_name:
             if self.console:
-                self.console.append_to_console(f"No valid data for channel {self.channel}")
+                self.console.append_to_console(f"Ignoring data for tag {tag_name}, expected {self.channel}")
+            logging.debug(f"Ignoring data for tag {tag_name}, expected {self.channel}")
             return
-        if not isinstance(sample_rate, (int, float)) or sample_rate <= 0:
+
+        # Since tag_name matches, use the first main channel (as done previously)
+        channel_idx = 0  # Default to the first main channel
+        num_channels = 4  # From mqtthandler.py and publish.py
+        num_tacho_channels = 2
+
+        # Validate channel data
+        if not values or len(values) < (num_channels + num_tacho_channels):
             if self.console:
-                self.console.append_to_console(f"Invalid sample rate: {sample_rate}, using default {self.sample_rate}")
-            sample_rate = self.sample_rate
+                self.console.append_to_console(f"Invalid data: expected at least {num_channels + num_tacho_channels} channels, got {len(values)}")
+            logging.warning(f"Invalid data: expected at least {num_channels + num_tacho_channels} channels, got {len(values)}")
+            return
 
         try:
-            # Extract the specified channel's data
-            channel_data = values[self.channel]
+            if channel_idx >= len(values):
+                if self.console:
+                    self.console.append_to_console(f"Channel index {channel_idx} out of range for {len(values)} channels")
+                logging.warning(f"Channel index {channel_idx} out of range for {len(values)} channels")
+                return
 
-            # Convert to voltage
-            voltage_data = [(v - 32768) * self.scaling_factor for v in channel_data]
+            self.sample_rate = sample_rate if sample_rate > 0 else 4096
+            raw_data = np.array(values[channel_idx][:self.max_samples], dtype=np.float32)
+            self.latest_data = raw_data
+            logging.debug(f"Channel {channel_idx} data (first 5 samples): {self.latest_data[:5]}")
+        except Exception as e:
+            logging.error(f"Error in on_data_received: {e}")
+            if self.console:
+                self.console.append_to_console(f"Error in Centerline View: {e}")
 
-            # Calculate centerline (mean)
+    def update_plot(self):
+        if self.latest_data is None:
+            return
+
+        try:
+            # Convert to voltage with adjusted scaling factor
+            voltage_data = [(v - 32768) * self.scaling_factor for v in self.latest_data]
+            voltage_data = np.array(voltage_data, dtype=np.float32)
+            n = len(voltage_data)
+            if n < 2:
+                if self.console:
+                    self.console.append_to_console(f"Data too short for plotting: {n} samples")
+                logging.warning(f"Data too short for plotting: {n} samples")
+                return
+
+            # Calculate centerline (mean) and control limits (same as original)
             mean = np.mean(voltage_data)
-
-            # Calculate standard deviation for UCL/LCL
             std = np.std(voltage_data)
             ucl = mean + 3 * std
             lcl = mean - 3 * std
 
             # Generate time axis
-            time = np.arange(len(voltage_data)) / sample_rate
+            time = np.array([i / self.sample_rate for i in range(n)])
 
-            # Plot the data
-            self.ax.clear()
-            self.ax.plot(time, voltage_data, label=f"Channel {self.channel} ({tag_name})", color='blue')
-            self.ax.axhline(y=mean, color='green', linestyle='--', label=f'Centerline (Mean = {mean:.2f} V)')
-            self.ax.axhline(y=ucl, color='red', linestyle='--', label=f'UCL = {ucl:.2f} V')
-            self.ax.axhline(y=lcl, color='red', linestyle='--', label=f'LCL = {lcl:.2f} V')
-            self.ax.set_title(f"Centerline Control Chart - Model: {self.model_name}, Channel: {self.channel}")
-            self.ax.set_xlabel("Time (s)")
-            self.ax.set_ylabel("Voltage (V)")
-            self.ax.legend()
-            self.ax.grid(True)
-
-            # Ensure the canvas is updated
-            self.canvas.draw()
-            self.canvas.flush_events()
+            # Update the plot
+            self.plot_item.setData(time, voltage_data)
+            self.mean_line.setValue(mean)
+            self.ucl_line.setValue(ucl)
+            self.lcl_line.setValue(lcl)
 
             if self.console:
                 self.console.append_to_console(
-                    f"Plotted channel {self.channel}: Mean={mean:.2f} V, UCL={ucl:.2f} V, LCL={lcl:.2f} V"
+                    f"Centerline Updated: Samples={n}, Mean={mean:.2f} V, UCL={ucl:.2f} V, LCL={lcl:.2f} V, Fs={self.sample_rate}Hz"
                 )
-
+                logging.debug(f"Plotted channel {self.channel_index}: Mean={mean:.2f} V, UCL={ucl:.2f} V, LCL={lcl:.2f} V")
         except Exception as e:
+            logging.error(f"Error updating Centerline plot: {e}")
             if self.console:
-                self.console.append_to_console(f"Error plotting data: {str(e)}")
-            return
+                self.console.append_to_console(f"Error updating Centerline plot: {e}")
+
+    def close(self):
+        self.update_timer.stop()
