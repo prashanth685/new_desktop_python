@@ -7,7 +7,7 @@ import logging
 
 
 class ChannelData:
-    def __init__(self, channel_name, date_time, rpm, gap, direct, bandpass, one_xa, one_xp, two_xa, two_xp, nx_amp, nx_phase):
+    def __init__(self, channel_name, date_time, rpm, gap, direct, bandpass, one_xa, one_xp, two_xa, two_xp, nx_amp, nx_phase, vpp, vrms):
         self.channel_name = channel_name
         self.date_time = date_time
         self.rpm = rpm
@@ -20,6 +20,9 @@ class ChannelData:
         self.two_xp = two_xp
         self.nx_amp = nx_amp
         self.nx_phase = nx_phase
+        self.vpp = vpp
+        self.vrms = vrms
+
 
 class TabularViewFeature:
     def __init__(self, parent, mqtt_handler, project_name, channel=None, model_name=None, console=None, channel_names=None):
@@ -80,12 +83,13 @@ class TabularViewFeature:
         self.trigger_plot.setXRange(0, 1)
         self.trigger_curve = self.trigger_plot.plot(pen=(128, 0, 128))
 
-        # Initialize table
+        # Initialize table with additional columns for Vpp and Vrms
         self.table = QTableWidget()
-        self.table.setColumnCount(12)
+        self.table.setColumnCount(14)
         self.table.setHorizontalHeaderLabels([
             "Channel Name", "DateTime", "RPM", "Gap", "Direct", "Bandpass",
-            "1X Amp", "1X Phase", "2X Amp", "2X Phase", "NX Amp", "NX Phase"
+            "1X Amp", "1X Phase", "2X Amp", "2X Phase", "NX Amp", "NX Phase",
+            "Vpp", "Vrms"
         ])
         layout.addWidget(self.table)
 
@@ -166,106 +170,112 @@ class TabularViewFeature:
                 self.waiting_label.setText("Not enough trigger points.")
                 return
 
-            # Vibration analysis
+            # Vibration analysis using DFT
+            channel_data_list = []
             sine_theta_values = []
             cosine_theta_values = []
             sine_theta_indices_list = []
-            cycle_sums = []
-            cosine_cycle_sums = []
-            segment_lengths = []
 
-            for i in range(len(trigger_indices) - 1):
-                start_index, end_index = trigger_indices[i], trigger_indices[i + 1]
-                segment_length = end_index - start_index
-                if segment_length <= 0:
-                    continue
-
-                f, N = 1.0, segment_length
-                sine_sum, cosine_sum = 0.0, 0.0
-                for n in range(segment_length):
-                    global_index = start_index + n
-                    theta = (2 * math.pi * f * n) / N
-                    sine_theta, cosine_theta = math.sin(theta), math.cos(theta)
-                    sine_theta_values.append(sine_theta)
-                    cosine_theta_values.append(cosine_theta)
-                    sine_theta_indices_list.append(global_index)
-                    sine_sum += calibrated_data[0][global_index] * sine_theta
-                    cosine_sum += calibrated_data[0][global_index] * cosine_theta
-                cycle_sums.append(sine_sum)
-                cosine_cycle_sums.append(cosine_sum)
-                segment_lengths.append(segment_length)
-
-            self.channel1_sine_theta_data = np.array(sine_theta_values)
-            self.channel1_cosine_theta_data = np.array(cosine_theta_values)
-            self.sine_theta_indices = np.array(sine_theta_indices_list)
-
-            self.log(f"Computed {len(self.channel1_sine_theta_data)} sine-theta and cosine-theta values for Channel 1.")
-            self.log(f"Number of segments processed: {len(cycle_sums)}, x values: [{', '.join(f'{x:.2f}' for x in cycle_sums)}]")
-            self.log(f"Number of segments processed: {len(cosine_cycle_sums)}, y values: [{', '.join(f'{y:.2f}' for y in cosine_cycle_sums)}]")
-
-            amplitudes = [math.sqrt((x / N) ** 2 + (y / N) ** 2) * 4 for x, y, N in zip(cycle_sums, cosine_cycle_sums, segment_lengths)]
-            phases = [math.atan2(y, x) * (180.0 / math.pi) for x, y in zip(cycle_sums, cosine_cycle_sums)]
-
-            self.cycle_sums_label.setText(
-                f"x = [{', '.join(f'{x:.2f}' for x in cycle_sums)}]\n"
-                f"y = [{', '.join(f'{y:.2f}' for y in cosine_cycle_sums)}]\n"
-                f"Amplitude = [{', '.join(f'{a:.2f}' for a in amplitudes)}]\n"
-                f"Phase (deg) = [{', '.join(f'{p:.2f}' for p in phases)}]\n"
-                f"Trigger Indexes(1): [{', '.join(map(str, trigger_indices))}]"
-            )
-
-            # Calculate 1X, 2X, 3X amplitudes for all channels
-            channel_data_list = []
             for channel_index in range(main_channels):
                 one_x_amplitudes = []
+                one_x_phases = []
                 two_x_amplitudes = []
+                two_x_phases = []
                 three_x_amplitudes = []
+                three_x_phases = []
+                vpps = []
+                vrmss = []
+
                 for i in range(len(trigger_indices) - 1):
                     start_index, end_index = trigger_indices[i], trigger_indices[i + 1]
                     segment_length = end_index - start_index
                     if segment_length <= 0:
                         continue
 
-                    for f in [1.0, 2.0, 3.0]:
-                        N = segment_length
-                        sine_sum, cosine_sum = 0.0, 0.0
+                    segment_data = calibrated_data[channel_index][start_index:end_index]
+                    N = segment_length
+                    W_N = np.exp(-1j * 2 * np.pi / N)
+
+                    # Calculate Vpp and Vrms for the segment
+                    vpp = np.max(segment_data) - np.min(segment_data)
+                    vrms = np.sqrt(np.mean(segment_data ** 2))
+                    vpps.append(vpp)
+                    vrmss.append(vrms)
+
+                    # Generate sine and cosine theta for Channel 1
+                    if channel_index == 0:
                         for n in range(segment_length):
                             global_index = start_index + n
-                            theta = (2 * math.pi * f * n) / N
-                            sine_sum += calibrated_data[channel_index][global_index] * math.sin(theta)
-                            cosine_sum += calibrated_data[channel_index][global_index] * math.cos(theta)
-                        amplitude = math.sqrt((sine_sum / N) ** 2 + (cosine_sum / N) ** 2) * 4
-                        if f == 1.0:
-                            one_x_amplitudes.append(amplitude)
-                        elif f == 2.0:
-                            two_x_amplitudes.append(amplitude)
-                        elif f == 3.0:
-                            three_x_amplitudes.append(amplitude)
+                            theta = (2 * np.pi * n) / N
+                            sine_theta_values.append(np.sin(theta))
+                            cosine_theta_values.append(np.cos(theta))
+                            sine_theta_indices_list.append(global_index)
 
-                one_x_average = sum(one_x_amplitudes) / len(one_x_amplitudes) if one_x_amplitudes else 0.0
-                two_x_average = sum(two_x_amplitudes) / len(two_x_amplitudes) if two_x_amplitudes else 0.0
-                three_x_average = sum(three_x_amplitudes) / len(three_x_amplitudes) if three_x_amplitudes else 0.0
+                    # Calculate DFT for k=1, k=2, k=3
+                    for k in [1, 2, 3]:
+                        X_k = 0
+                        for n in range(N):
+                            X_k += segment_data[n] * (W_N ** (k * n))
+                        # Amplitude is scaled by 2/N for magnitude
+                        amplitude = (2 / N) * np.abs(X_k)
+                        # Phase in degrees
+                        phase = np.angle(X_k, deg=True)
+
+                        if k == 1:
+                            one_x_amplitudes.append(amplitude)
+                            one_x_phases.append(phase)
+                        elif k == 2:
+                            two_x_amplitudes.append(amplitude)
+                            two_x_phases.append(phase)
+                        elif k == 3:
+                            three_x_amplitudes.append(amplitude)
+                            three_x_phases.append(phase)
+
+                # Compute averages
+                one_x_avg_amp = np.mean(one_x_amplitudes) if one_x_amplitudes else 0.0
+                one_x_avg_phase = np.mean(one_x_phases) if one_x_phases else 0.0
+                two_x_avg_amp = np.mean(two_x_amplitudes) if two_x_amplitudes else 0.0
+                two_x_avg_phase = np.mean(two_x_phases) if two_x_phases else 0.0
+                three_x_avg_amp = np.mean(three_x_amplitudes) if three_x_amplitudes else 0.0
+                three_x_avg_phase = np.mean(three_x_phases) if three_x_phases else 0.0
+                vpp_avg = np.mean(vpps) if vpps else 0.0
+                vrms_avg = np.mean(vrmss) if vrmss else 0.0
 
                 channel_data_list.append(ChannelData(
                     channel_name=self.channel_names[channel_index],
                     date_time=datetime.now().strftime("%d-%b-%Y %I:%M:%S %p"),
                     rpm="0",
                     gap="0",
-                    direct="0",
+                    direct=f"{vpp_avg:.2f}",  # Use Vpp as direct
                     bandpass="0",
-                    one_xa=f"{one_x_average:.2f}",
-                    one_xp="0",
-                    two_xa=f"{two_x_average:.2f}",
-                    two_xp="0",
-                    nx_amp=f"{three_x_average:.2f}",
-                    nx_phase="0"
+                    one_xa=f"{one_x_avg_amp:.2f}",
+                    one_xp=f"{one_x_avg_phase:.2f}",
+                    two_xa=f"{two_x_avg_amp:.2f}",
+                    two_xp=f"{two_x_avg_phase:.2f}",
+                    nx_amp=f"{three_x_avg_amp:.2f}",
+                    nx_phase=f"{three_x_avg_phase:.2f}",
+                    vpp=f"{vpp_avg:.2f}",
+                    vrms=f"{vrms_avg:.2f}"
                 ))
 
+            self.channel1_sine_theta_data = np.array(sine_theta_values)
+            self.channel1_cosine_theta_data = np.array(cosine_theta_values)
+            self.sine_theta_indices = np.array(sine_theta_indices_list)
+
+            self.log(f"Computed {len(self.channel1_sine_theta_data)} sine-theta and cosine-theta values for Channel 1.")
             self.current_channel_data = channel_data_list
             self.update_table()
             self.update_plots()
 
-            self.log(f"Processed MQTT message for topic {tag_name}: Updated table with 1x, 2x, and 3x amplitudes.")
+            self.cycle_sums_label.setText(
+                f"Trigger Indices: [{', '.join(map(str, trigger_indices))}]\n"
+                f"1X Amplitudes (Ch1): [{', '.join(f'{a:.2f}' for a in one_x_amplitudes)}]\n"
+                f"1X Phases (Ch1): [{', '.join(f'{p:.2f}' for p in one_x_phases)}]\n"
+                f"Vpp (Ch1): [{', '.join(f'{v:.2f}' for v in vpps)}]\n"
+                f"Vrms (Ch1): [{', '.join(f'{v:.2f}' for v in vrmss)}]"
+            )
+
+            self.log(f"Processed MQTT message for topic {tag_name}: Updated table with 1x, 2x, 3x amplitudes, Vpp, and Vrms.")
             self.waiting_label.setVisible(False)
         except Exception as e:
             self.log(f"Error processing MQTT message: {str(e)}")
@@ -307,3 +317,5 @@ class TabularViewFeature:
             self.table.setItem(row, 9, QTableWidgetItem(data.two_xp))
             self.table.setItem(row, 10, QTableWidgetItem(data.nx_amp))
             self.table.setItem(row, 11, QTableWidgetItem(data.nx_phase))
+            self.table.setItem(row, 12, QTableWidgetItem(data.vpp))
+            self.table.setItem(row, 13, QTableWidgetItem(data.vrms))

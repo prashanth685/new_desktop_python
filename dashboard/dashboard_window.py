@@ -103,12 +103,12 @@ class DashboardWindow(QWidget):
                 background-color: #2c5d9b;
             }
             QMdiSubWindow {
-                background-color: #263238;
-                border: 1px solid #4a90e2;
+                background-color: #d1d6d9;
+                border: 1px solid #d1d6d9;
                 border-radius: 4px;
             }
             QMdiSubWindow > QWidget {
-                background-color: #263238;
+                background-color: #d1d6d9;
                 color: #ecf0f1;
             }
         """)
@@ -142,7 +142,7 @@ class DashboardWindow(QWidget):
         self.main_splitter.addWidget(self.tree_view)
 
         right_container = QWidget()
-        right_container.setStyleSheet("background-color: #2E3440;")
+        right_container.setStyleSheet("background-color: #d1d6d9;")
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)

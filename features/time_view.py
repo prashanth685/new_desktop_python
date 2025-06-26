@@ -13,9 +13,9 @@ class TimeAxisItem(AxisItem):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
-    # def tickStrings(self, values, scale, spacing):
-    #     """Convert timestamps to 'YYYY-MM-DD\nHH:MM:SS' format."""
-    #     return [datetime.fromtimestamp(v).strftime('%Y-%m-%d\n%H:%M:%S') for v in values]
+    def tickStrings(self, values, scale, spacing):
+        """Convert timestamps to 'YYYY-MM-DD\nHH:MM:SS' format."""
+        return [datetime.fromtimestamp(v).strftime('%Y-%m-%d\n%H:%M:%S') for v in values]
 
 class MouseTracker(QObject):
     """Event filter to track mouse enter/leave on plot viewport."""

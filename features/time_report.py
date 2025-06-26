@@ -25,7 +25,7 @@ class QRangeSlider(QWidget):
         self.setMouseTracking(True)
         self.setStyleSheet("""
             QWidget {
-                background-color: #34495e;
+                background-color: #d1d6d9;
             }
         """)
 
@@ -165,19 +165,19 @@ class TimeReportFeature:
 
         # Header
         header = QLabel(f"TIME REPORT FOR {self.project_name.upper()}")
-        header.setStyleSheet("color: white; font-size: 26px; font-weight: bold; padding: 8px;")
+        header.setStyleSheet("color: black; font-size: 26px; font-weight: bold; padding: 8px;")
         layout.addWidget(header, alignment=Qt.AlignCenter)
 
         # Controls container
         controls_widget = QWidget()
-        controls_widget.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        controls_widget.setStyleSheet("background-color: #d1d6d9; border-radius: 5px; padding: 10px;")
         controls_layout = QVBoxLayout()
         controls_widget.setLayout(controls_layout)
 
         # File selection layout
         file_layout = QHBoxLayout()
         file_label = QLabel(f"Select Saved File (Model: {self.model_name or 'None'}, Channel: {self.channel or 'All'}):")
-        file_label.setStyleSheet("color: white; font-size: 16px; font: bold")
+        file_label.setStyleSheet("color: black; font-size: 16px; font: bold")
         self.file_combo = QComboBox()
         self.file_combo.addItem("Loading files...")
         self.file_combo.setStyleSheet("""
@@ -234,7 +234,7 @@ class TimeReportFeature:
         self.ok_button.setStyleSheet("""
             QPushButton {
                 background-color: #1a73e8;
-                color: white;
+                color: black;
                 padding: 15px;
                 font-size: 15px;
                 width: 100px;
@@ -257,16 +257,16 @@ class TimeReportFeature:
         # Time range selection layout
         time_range_layout = QHBoxLayout()
         start_time_label = QLabel("Select Start Time:")
-        start_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        start_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
         self.start_time_edit = QDateTimeEdit()
-        self.start_time_edit.setStyleSheet("background-color: #34495e; color: white; border: 2px solid white; padding: 15px; font: bold; width: 200px")
+        self.start_time_edit.setStyleSheet("background-color: #34495e; color: black; border: 2px solid black; padding: 15px; font: bold; width: 200px")
         self.start_time_edit.setDisplayFormat("HH:mm:ss")
         self.start_time_edit.dateTimeChanged.connect(self.validate_time_range)
 
         end_time_label = QLabel("Select End Time:")
-        end_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        end_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
         self.end_time_edit = QDateTimeEdit()
-        self.end_time_edit.setStyleSheet("background-color: #34495e; color: white; border: 2px solid white; padding: 15px; font: bold; width: 200px")
+        self.end_time_edit.setStyleSheet("background-color: #34495e; color: black; border: 2px solid black; padding: 15px; font: bold; width: 200px")
         self.end_time_edit.setDisplayFormat("HH:mm:ss")
         self.end_time_edit.dateTimeChanged.connect(self.validate_time_range)
 
@@ -280,7 +280,7 @@ class TimeReportFeature:
         # Slider layout
         slider_layout = QGridLayout()
         slider_label = QLabel("Drag Time Range:")
-        slider_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        slider_label.setStyleSheet("color: black; font-size: 14px; font: bold")
         slider_label.setFixedWidth(150)
         self.time_slider = QRangeSlider(self.widget)
         self.time_slider.valueChanged.connect(self.update_time_from_slider)
@@ -292,9 +292,9 @@ class TimeReportFeature:
         # Time info layout
         time_info_layout = QHBoxLayout()
         self.start_time_label = QLabel("File Start Time: Loading...")
-        self.start_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        self.start_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
         self.stop_time_label = QLabel("File Stop Time: Loading...")
-        self.stop_time_label.setStyleSheet("color: white; font-size: 14px; font: bold")
+        self.stop_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
         time_info_layout.addWidget(self.start_time_label)
         time_info_layout.addWidget(self.stop_time_label)
         time_info_layout.addStretch()
@@ -331,7 +331,7 @@ class TimeReportFeature:
         """)
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_content.setStyleSheet("background-color: #2c3e50; border-radius: 5px; padding: 10px;")
+        self.scroll_content.setStyleSheet("background-color: #d1d6d9; border-radius: 5px; padding: 10px;")
         self.scroll_area.setWidget(self.scroll_content)
         layout.addWidget(self.scroll_area, stretch=1)
 

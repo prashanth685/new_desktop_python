@@ -45,7 +45,7 @@ class ProjectStructureWidget(QWidget):
         left_panel = QWidget()
         left_layout = QVBoxLayout(left_panel)
         left_layout.setContentsMargins(10, 10, 10, 10)
-        left_layout.addWidget(QLabel('<h2 style="color: white;">Select Project</h2>'))
+        left_layout.addWidget(QLabel('<h2 style="color: black;">Select Project</h2>'))
 
         self.search_bar = QLineEdit()
         self.search_bar.setPlaceholderText("Search Projects")
@@ -74,10 +74,10 @@ class ProjectStructureWidget(QWidget):
         right_panel = QWidget()
         right_layout = QVBoxLayout(right_panel)
         right_layout.setContentsMargins(10, 10, 10, 10)
-        right_layout.addWidget(QLabel('<h2 style="color: white;">Project Structure</h2>'))
+        right_layout.addWidget(QLabel('<h2 style="color: black;">Project Structure</h2>'))
 
         self.tab_widget = QTabWidget()
-        self.tab_widget.setStyleSheet("QTabWidget::pane { border: 1px solid #d3d3d3; border-radius: 5px; } QTabBar::tab { padding: 8px 16px; font-size: 14px; } QTabBar::tab:selected { color: white; border-bottom: white; }")
+        self.tab_widget.setStyleSheet("QTabWidget::pane { border: 1px solid #d3d3d3; border-radius: 5px; } QTabBar::tab { padding: 8px 16px; font-size: 14px; } QTabBar::tab:selected { color: black; border-bottom: black; }")
         self.tree_view = self.create_tree_view()
         self.tab_widget.addTab(self.tree_view, "Tree View")
         right_layout.addWidget(self.tab_widget)

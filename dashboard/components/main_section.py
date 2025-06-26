@@ -24,7 +24,7 @@ class MainSection(QWidget):
             QScrollBar:vertical {
                 border: none;
                 background: #2c3e50;
-                width: 8px;
+                width: 15px;
                 margin: 0px 0px 0px 0px;
             }
             QScrollBar::handle:vertical {
@@ -51,12 +51,16 @@ class MainSection(QWidget):
 
         self.mdi_area = QMdiArea()
         self.mdi_area.setStyleSheet("""
-            QMdiArea { background-color: #263238; border: none; }
+            QMdiArea { background-color: #d1d6d9; border: none; }
             QMdiSubWindow {
-                background-color: #263238;
-                border: 1px solid #4a90e2;
+                background-color: #d1d6d9;
+                border: 1px solid #d1d6d9;
                 border-radius: 4px;
             }
+            QMdiSubWindow::title{
+                height:40px;
+            }
+            
         """)
         self.mdi_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.mdi_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
