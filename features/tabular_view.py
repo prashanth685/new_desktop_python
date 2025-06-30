@@ -1,321 +1,227 @@
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QSplitter
+from PyQt5.QtCore import Qt
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QTableWidget, QTableWidgetItem
-import pyqtgraph as pg
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg as FigureCanvas
 from datetime import datetime
-import math
-import logging
-
-
-class ChannelData:
-    def __init__(self, channel_name, date_time, rpm, gap, direct, bandpass, one_xa, one_xp, two_xa, two_xp, nx_amp, nx_phase, vpp, vrms):
-        self.channel_name = channel_name
-        self.date_time = date_time
-        self.rpm = rpm
-        self.gap = gap
-        self.direct = direct
-        self.bandpass = bandpass
-        self.one_xa = one_xa
-        self.one_xp = one_xp
-        self.two_xa = two_xa
-        self.two_xp = two_xp
-        self.nx_amp = nx_amp
-        self.nx_phase = nx_phase
-        self.vpp = vpp
-        self.vrms = vrms
-
 
 class TabularViewFeature:
-    def __init__(self, parent, mqtt_handler, project_name, channel=None, model_name=None, console=None, channel_names=None):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
         self.parent = parent
-        self.mqtt_handler = mqtt_handler
+        self.db = db
         self.project_name = project_name
         self.channel = channel
         self.model_name = model_name
         self.console = console
-        self.channel_names = channel_names or ["Channel1", "Channel2", "Channel3", "Channel4"]
-        self.tag_name = f"{project_name}/{model_name}" if model_name else project_name
-        self.channel1_data = np.array([])
-        self.channel1_sine_theta_data = np.array([])
-        self.channel1_cosine_theta_data = np.array([])
-        self.sine_theta_indices = np.array([])
-        self.trigger_data = np.array([])
-        self.current_channel_data = []
+        self.widget = None
+        self.data = None
+        self.sample_rate = 4096  # Default sample rate, matching mqtthandler.py
         self.initUI()
-        self.initialize()
 
     def initUI(self):
         self.widget = QWidget()
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        self.waiting_label = QLabel("Waiting for data...")
-        layout.addWidget(self.waiting_label)
+        # Create splitter for table and plots
+        splitter = QSplitter(Qt.Vertical)
+        layout.addWidget(splitter)
 
-        # Initialize pyqtgraph plots
-        self.plot_widget = pg.GraphicsLayoutWidget()
-        layout.addWidget(self.plot_widget)
-
-        self.channel1_plot = self.plot_widget.addPlot(row=0, col=0, title="Channel 1 Waveform")
-        self.channel1_plot.setLabel('bottom', 'Sample Index')
-        self.channel1_plot.setLabel('left', 'Voltage (V)')
-        self.channel1_plot.setYRange(0, 3.3)
-        self.channel1_plot.setXRange(0, 1)
-        self.channel1_curve = self.channel1_plot.plot(pen='b')
-
-        self.sine_theta_plot = self.plot_widget.addPlot(row=1, col=0, title="Channel 1 Sine-Theta Plot")
-        self.sine_theta_plot.setLabel('bottom', 'Sample Index')
-        self.sine_theta_plot.setLabel('left', 'Sine Theta')
-        self.sine_theta_plot.setYRange(-1, 1)
-        self.sine_theta_plot.setXRange(0, 1)
-        self.sine_theta_curve = self.sine_theta_plot.plot(pen='r')
-
-        self.cosine_theta_plot = self.plot_widget.addPlot(row=2, col=0, title="Channel 1 Cosine-Theta Plot")
-        self.cosine_theta_plot.setLabel('bottom', 'Sample Index')
-        self.cosine_theta_plot.setLabel('left', 'Cosine Theta')
-        self.cosine_theta_plot.setYRange(-1, 1)
-        self.cosine_theta_plot.setXRange(0, 1)
-        self.cosine_theta_curve = self.cosine_theta_plot.plot(pen='g')
-
-        self.trigger_plot = self.plot_widget.addPlot(row=3, col=0, title="Trigger (Tacho 2) Plot")
-        self.trigger_plot.setLabel('bottom', 'Sample Index')
-        self.trigger_plot.setLabel('left', 'Trigger Value')
-        self.trigger_plot.setYRange(-0.1, 1.1)
-        self.trigger_plot.setXRange(0, 1)
-        self.trigger_curve = self.trigger_plot.plot(pen=(128, 0, 128))
-
-        # Initialize table with additional columns for Vpp and Vrms
+        # Table setup
         self.table = QTableWidget()
+        self.table.setRowCount(1)
         self.table.setColumnCount(14)
-        self.table.setHorizontalHeaderLabels([
-            "Channel Name", "DateTime", "RPM", "Gap", "Direct", "Bandpass",
-            "1X Amp", "1X Phase", "2X Amp", "2X Phase", "NX Amp", "NX Phase",
-            "Vpp", "Vrms"
-        ])
-        layout.addWidget(self.table)
+        headers = [
+            "RPM", "Gap", "Channel Name", "Date Time", "Direct", "1x Amp", "1x Phase",
+            "2x Amp", "2x Phase", "nx Amp", "nx Phase", "Vpp", "Vrms", "Twiddle Factor"
+        ]
+        self.table.setHorizontalHeaderLabels(headers)
+        self.table.setFixedHeight(100)
+        splitter.addWidget(self.table)
 
-        self.cycle_sums_label = QLabel("Cycle Data: (No data available)")
-        layout.addWidget(self.cycle_sums_label)
+        # Plot setup
+        self.figure, (self.ax_wave, self.ax_sin, self.ax_cos) = plt.subplots(3, 1, figsize=(8, 6))
+        self.canvas = FigureCanvas(self.figure)
+        splitter.addWidget(self.canvas)
+
+        # Adjust splitter sizes
+        splitter.setSizes([100, 400])
+
+        if not self.model_name and self.console:
+            self.console.append_to_console("No model selected in TabularViewFeature.")
+        if not self.channel and self.console:
+            self.console.append_to_console("No channel selected in TabularViewFeature.")
 
     def get_widget(self):
         return self.widget
 
-    def log(self, message):
-        if self.console:
-            self.console.append_to_console(message)
-        logging.debug(message)
+    def calculate_metrics(self, channel_data, tacho_trigger_data):
+        metrics = {
+            "rpm": 0, "gap": 0, "direct": 0, "one_xa": 0, "one_xp": 0,
+            "two_xa": 0, "two_xp": 0, "nx_amp": 0, "nx_phase": 0,
+            "vpp": 0, "vrms": 0, "twiddle_factor": 0
+        }
 
-    def initialize(self):
-        if not self.model_name or not self.channel:
-            self.log("Model or channel not specified in TabularViewFeature.")
-            self.waiting_label.setText("Model or channel not specified.")
+        expected_samples = 4096  # As per mqtthandler.py
+        if len(channel_data) != expected_samples or len(tacho_trigger_data) != expected_samples:
+            if self.console:
+                self.console.append_to_console(
+                    f"Invalid data length: channel_data={len(channel_data)}, "
+                    f"tacho_trigger_data={len(tacho_trigger_data)}, expected={expected_samples}"
+                )
+            return metrics
+
+        # Basic calculations
+        metrics["vpp"] = float(np.max(channel_data) - np.min(channel_data))
+        metrics["vrms"] = float(np.sqrt(np.mean(np.square(channel_data))))
+        metrics["direct"] = float(np.mean(channel_data))
+
+        # Trigger detection
+        threshold = np.mean(tacho_trigger_data) + 0.5 * np.std(tacho_trigger_data)
+        trigger_indices = np.where(np.diff((tacho_trigger_data > threshold).astype(int)) > 0)[0]
+        
+        # RPM calculation
+        if len(trigger_indices) >= 2:
+            samples_per_rotation = np.mean(np.diff(trigger_indices))
+            if samples_per_rotation > 0:
+                metrics["rpm"] = (60 * self.sample_rate) / samples_per_rotation
+            else:
+                if self.console:
+                    self.console.append_to_console("Invalid samples per rotation for RPM.")
+        else:
+            if self.console:
+                self.console.append_to_console("Insufficient trigger points for RPM.")
+
+        # Gap calculation
+        metrics["gap"] = float(np.mean(tacho_trigger_data))
+
+        # FFT for 1x, 2x, nx
+        n = len(channel_data)
+        fft_vals = np.fft.fft(channel_data)
+        freqs = np.fft.fftfreq(n, 1/self.sample_rate)
+        positive_freqs = freqs[:n//2]
+        fft_mags = np.abs(fft_vals)[:n//2] * 2 / n
+        fft_phases = np.angle(fft_vals)[:n//2]
+
+        fundamental_freq = metrics["rpm"] / 60 if metrics["rpm"] > 0 else 1
+        idx_1x = np.argmin(np.abs(positive_freqs - fundamental_freq))
+        idx_2x = np.argmin(np.abs(positive_freqs - 2 * fundamental_freq))
+
+        if idx_1x < len(fft_mags):
+            metrics["one_xa"] = float(fft_mags[idx_1x])
+            metrics["one_xp"] = float(fft_phases[idx_1x])
+        if idx_2x < len(fft_mags):
+            metrics["two_xa"] = float(fft_mags[idx_2x])
+            metrics["two_xp"] = float(fft_phases[idx_2x])
+
+        # nx amplitude and phase
+        if len(fft_mags) > 3:
+            nx_idx = np.argmax(fft_mags[3:]) + 3
+            metrics["nx_amp"] = float(fft_mags[nx_idx]) if nx_idx < len(fft_mags) else 0
+            metrics["nx_phase"] = float(fft_phases[nx_idx]) if nx_idx < len(fft_phases) else 0
+
+        # Twiddle factor (use only valid trigger indices)
+        valid_trigger_indices = trigger_indices[trigger_indices < len(fft_phases)]
+        if len(valid_trigger_indices) >= 2:
+            phase_diffs = np.diff(fft_phases[valid_trigger_indices])
+            metrics["twiddle_factor"] = float(np.std(phase_diffs)) if len(phase_diffs) > 0 else 0
+        else:
+            if self.console:
+                self.console.append_to_console("Insufficient valid trigger indices for twiddle factor.")
+
+        return metrics
+
+    def update_plots(self, channel_data, tacho_trigger_data):
+        self.ax_wave.clear()
+        self.ax_sin.clear()
+        self.ax_cos.clear()
+
+        expected_samples = 4096
+        if len(channel_data) != expected_samples:
+            if self.console:
+                self.console.append_to_console(f"No valid channel data for plotting: length={len(channel_data)}")
+            self.canvas.draw()
             return
 
-        if self.channel not in self.channel_names:
-            self.log(f"Selected channel {self.channel} not found in channel names: {self.channel_names}")
-            self.waiting_label.setText("Selected channel not found.")
-            return
+        # Time axis
+        t = np.arange(len(channel_data)) / self.sample_rate
 
-        self.mqtt_handler.data_received.connect(self.on_data_received)
-        self.mqtt_handler.connection_status.connect(self.on_connection_status)
-        self.mqtt_handler.start()
-        self.log(f"Initialized TabularViewFeature for {self.project_name}/{self.model_name}/{self.channel}")
+        # Waveform plot
+        self.ax_wave.plot(t, channel_data, label="Channel 1 Waveform")
+        self.ax_wave.set_title("Waveform")
+        self.ax_wave.set_xlabel("Time (s)")
+        self.ax_wave.set_ylabel("Amplitude")
+        self.ax_wave.legend()
+        self.ax_wave.grid(True)
 
-    def on_connection_status(self, status):
-        self.log(f"MQTT Connection Status: {status}")
-        self.waiting_label.setText(status)
+        # Sin and Cos plots
+        if len(tacho_trigger_data) == expected_samples:
+            threshold = np.mean(tacho_trigger_data) + 0.5 * np.std(tacho_trigger_data)
+            trigger_indices = np.where(np.diff((tacho_trigger_data > threshold).astype(int)) > 0)[0]
+            if len(trigger_indices) >= 2:
+                samples_per_rotation = np.mean(np.diff(trigger_indices))
+                if samples_per_rotation > 0:
+                    omega = 2 * np.pi * self.sample_rate / samples_per_rotation
+                    phase = omega * t
+                    self.ax_sin.plot(t, np.sin(phase), label="sin(θ)")
+                    self.ax_cos.plot(t, np.cos(phase), label="cos(θ)")
+                    self.ax_sin.set_title("sin(θ)")
+                    self.ax_cos.set_title("cos(θ)")
+                    self.ax_sin.set_xlabel("Time (s)")
+                    self.ax_cos.set_xlabel("Time (s)")
+                    self.ax_sin.set_ylabel("Amplitude")
+                    self.ax_cos.set_ylabel("Amplitude")
+                    self.ax_sin.legend()
+                    self.ax_cos.legend()
+                    self.ax_sin.grid(True)
+                    self.ax_cos.grid(True)
+                else:
+                    if self.console:
+                        self.console.append_to_console("Invalid samples per rotation for phase plots.")
+            else:
+                if self.console:
+                    self.console.append_to_console("Insufficient trigger points for phase plots.")
+        else:
+            if self.console:
+                self.console.append_to_console(f"No valid tacho data for plotting: length={len(tacho_trigger_data)}")
+
+        plt.tight_layout()
+        self.canvas.draw()
 
     def on_data_received(self, tag_name, model_name, values, sample_rate):
-        if model_name != self.model_name or tag_name != self.tag_name:
-            self.log(f"Ignoring data for tag {tag_name}/{model_name}, expected {self.tag_name}/{self.model_name}")
+        if self.model_name != model_name:
             return
-
-        try:
-            if len(values) != 6:
-                self.log(f"Expected 6 channels (4 main + 2 tacho), got {len(values)}")
-                self.waiting_label.setText("Unexpected channel count.")
-                return
-
-            main_channels = 4
-            samples_per_channel = 4096
-            num_tacho_channels = 2
-            expected_total = samples_per_channel * (main_channels + num_tacho_channels)
-
-            # Validate data length
-            if any(len(ch) != samples_per_channel for ch in values):
-                self.log(f"Expected {samples_per_channel} samples per channel, got {[len(ch) for ch in values]}")
-                return
-
-            # Calibrate main channel data (scale by 3.3/65535)
-            calibrated_data = [np.array(ch) * (3.3 / 65535.0) for ch in values[:main_channels]]
-            tacho_freq_data = np.array(values[main_channels])
-            self.trigger_data = np.array(values[main_channels + 1])
-            self.channel1_data = calibrated_data[0]
-
-            self.log(f"Processed {main_channels + num_tacho_channels} channels ({main_channels} main, {num_tacho_channels} tacho), {samples_per_channel} samples per channel.")
-
-            # Trigger detection
-            trigger_indices = np.where(self.trigger_data == 1)[0].tolist()
-            self.log(f"Raw trigger data contains {len(trigger_indices)} ones at indices: [{', '.join(map(str, trigger_indices))}]")
-
-            min_distance_between_triggers = 5
-            filtered_trigger_indices = [trigger_indices[0]]
-            for i in trigger_indices[1:]:
-                if i - filtered_trigger_indices[-1] >= min_distance_between_triggers:
-                    filtered_trigger_indices.append(i)
-            trigger_indices = filtered_trigger_indices
-            self.log(f"After filtering, {len(trigger_indices)} trigger points at indices: [{', '.join(map(str, trigger_indices))}]")
-
-            if len(trigger_indices) < 2:
-                self.log("Not enough trigger points detected. At least 2 triggers are required.")
-                self.waiting_label.setText("Not enough trigger points.")
-                return
-
-            # Vibration analysis using DFT
-            channel_data_list = []
-            sine_theta_values = []
-            cosine_theta_values = []
-            sine_theta_indices_list = []
-
-            for channel_index in range(main_channels):
-                one_x_amplitudes = []
-                one_x_phases = []
-                two_x_amplitudes = []
-                two_x_phases = []
-                three_x_amplitudes = []
-                three_x_phases = []
-                vpps = []
-                vrmss = []
-
-                for i in range(len(trigger_indices) - 1):
-                    start_index, end_index = trigger_indices[i], trigger_indices[i + 1]
-                    segment_length = end_index - start_index
-                    if segment_length <= 0:
-                        continue
-
-                    segment_data = calibrated_data[channel_index][start_index:end_index]
-                    N = segment_length
-                    W_N = np.exp(-1j * 2 * np.pi / N)
-
-                    # Calculate Vpp and Vrms for the segment
-                    vpp = np.max(segment_data) - np.min(segment_data)
-                    vrms = np.sqrt(np.mean(segment_data ** 2))
-                    vpps.append(vpp)
-                    vrmss.append(vrms)
-
-                    # Generate sine and cosine theta for Channel 1
-                    if channel_index == 0:
-                        for n in range(segment_length):
-                            global_index = start_index + n
-                            theta = (2 * np.pi * n) / N
-                            sine_theta_values.append(np.sin(theta))
-                            cosine_theta_values.append(np.cos(theta))
-                            sine_theta_indices_list.append(global_index)
-
-                    # Calculate DFT for k=1, k=2, k=3
-                    for k in [1, 2, 3]:
-                        X_k = 0
-                        for n in range(N):
-                            X_k += segment_data[n] * (W_N ** (k * n))
-                        # Amplitude is scaled by 2/N for magnitude
-                        amplitude = (2 / N) * np.abs(X_k)
-                        # Phase in degrees
-                        phase = np.angle(X_k, deg=True)
-
-                        if k == 1:
-                            one_x_amplitudes.append(amplitude)
-                            one_x_phases.append(phase)
-                        elif k == 2:
-                            two_x_amplitudes.append(amplitude)
-                            two_x_phases.append(phase)
-                        elif k == 3:
-                            three_x_amplitudes.append(amplitude)
-                            three_x_phases.append(phase)
-
-                # Compute averages
-                one_x_avg_amp = np.mean(one_x_amplitudes) if one_x_amplitudes else 0.0
-                one_x_avg_phase = np.mean(one_x_phases) if one_x_phases else 0.0
-                two_x_avg_amp = np.mean(two_x_amplitudes) if two_x_amplitudes else 0.0
-                two_x_avg_phase = np.mean(two_x_phases) if two_x_phases else 0.0
-                three_x_avg_amp = np.mean(three_x_amplitudes) if three_x_amplitudes else 0.0
-                three_x_avg_phase = np.mean(three_x_phases) if three_x_phases else 0.0
-                vpp_avg = np.mean(vpps) if vpps else 0.0
-                vrms_avg = np.mean(vrmss) if vrmss else 0.0
-
-                channel_data_list.append(ChannelData(
-                    channel_name=self.channel_names[channel_index],
-                    date_time=datetime.now().strftime("%d-%b-%Y %I:%M:%S %p"),
-                    rpm="0",
-                    gap="0",
-                    direct=f"{vpp_avg:.2f}",  # Use Vpp as direct
-                    bandpass="0",
-                    one_xa=f"{one_x_avg_amp:.2f}",
-                    one_xp=f"{one_x_avg_phase:.2f}",
-                    two_xa=f"{two_x_avg_amp:.2f}",
-                    two_xp=f"{two_x_avg_phase:.2f}",
-                    nx_amp=f"{three_x_avg_amp:.2f}",
-                    nx_phase=f"{three_x_avg_phase:.2f}",
-                    vpp=f"{vpp_avg:.2f}",
-                    vrms=f"{vrms_avg:.2f}"
-                ))
-
-            self.channel1_sine_theta_data = np.array(sine_theta_values)
-            self.channel1_cosine_theta_data = np.array(cosine_theta_values)
-            self.sine_theta_indices = np.array(sine_theta_indices_list)
-
-            self.log(f"Computed {len(self.channel1_sine_theta_data)} sine-theta and cosine-theta values for Channel 1.")
-            self.current_channel_data = channel_data_list
-            self.update_table()
-            self.update_plots()
-
-            self.cycle_sums_label.setText(
-                f"Trigger Indices: [{', '.join(map(str, trigger_indices))}]\n"
-                f"1X Amplitudes (Ch1): [{', '.join(f'{a:.2f}' for a in one_x_amplitudes)}]\n"
-                f"1X Phases (Ch1): [{', '.join(f'{p:.2f}' for p in one_x_phases)}]\n"
-                f"Vpp (Ch1): [{', '.join(f'{v:.2f}' for v in vpps)}]\n"
-                f"Vrms (Ch1): [{', '.join(f'{v:.2f}' for v in vrmss)}]"
+        if self.console:
+            self.console.append_to_console(
+                f"Tabular View ({self.model_name} - {self.channel}): Received data for {tag_name} - {len(values)} channels"
             )
 
-            self.log(f"Processed MQTT message for topic {tag_name}: Updated table with 1x, 2x, 3x amplitudes, Vpp, and Vrms.")
-            self.waiting_label.setVisible(False)
-        except Exception as e:
-            self.log(f"Error processing MQTT message: {str(e)}")
-            self.waiting_label.setText("Error processing data.")
+        if not values or len(values) < 2:
+            if self.console:
+                self.console.append_to_console("Insufficient data channels received.")
+            return
 
-    def update_plots(self):
-        if len(self.channel1_data) > 0:
-            indices = np.arange(len(self.channel1_data))
-            self.channel1_plot.setXRange(0, max(indices) + 1)
-            self.channel1_curve.setData(indices, self.channel1_data)
+        self.sample_rate = sample_rate
+        self.data = values
 
-        if len(self.channel1_sine_theta_data) > 0:
-            self.sine_theta_plot.setXRange(0, max(self.sine_theta_indices) + 1)
-            self.sine_theta_curve.setData(self.sine_theta_indices, self.channel1_sine_theta_data)
+        # Extract channel 1 and tacho_trigger_data (last channel)
+        channel_data = np.array(values[0], dtype=float)
+        tacho_trigger_data = np.array(values[-1], dtype=float)
 
-        if len(self.channel1_cosine_theta_data) > 0:
-            self.cosine_theta_plot.setXRange(0, max(self.sine_theta_indices) + 1)
-            self.cosine_theta_curve.setData(self.sine_theta_indices, self.channel1_cosine_theta_data)
+        # Calculate metrics
+        metrics = self.calculate_metrics(channel_data, tacho_trigger_data)
 
-        if len(self.trigger_data) > 0:
-            indices = np.arange(len(self.trigger_data))
-            self.trigger_plot.setXRange(0, max(indices) + 1)
-            self.trigger_curve.setData(indices, self.trigger_data)
+        # Update table
+        for col, (key, value) in enumerate([
+            (0, f"{metrics['rpm']:.2f}"), (1, f"{metrics['gap']:.2f}"),
+            (2, self.channel or "N/A"), (3, datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            (4, f"{metrics['direct']:.2f}"), (5, f"{metrics['one_xa']:.2f}"),
+            (6, f"{metrics['one_xp']:.2f}"), (7, f"{metrics['two_xa']:.2f}"),
+            (8, f"{metrics['two_xp']:.2f}"), (9, f"{metrics['nx_amp']:.2f}"),
+            (10, f"{metrics['nx_phase']:.2f}"), (11, f"{metrics['vpp']:.2f}"),
+            (12, f"{metrics['vrms']:.2f}"), (13, f"{metrics['twiddle_factor']:.2f}")
+        ]):
+            self.table.setItem(0, col, QTableWidgetItem(value))
 
-    def update_table(self):
-        self.table.setRowCount(0)
-        for data in self.current_channel_data:
-            row = self.table.rowCount()
-            self.table.insertRow(row)
-            self.table.setItem(row, 0, QTableWidgetItem(data.channel_name))
-            self.table.setItem(row, 1, QTableWidgetItem(data.date_time))
-            self.table.setItem(row, 2, QTableWidgetItem(data.rpm))
-            self.table.setItem(row, 3, QTableWidgetItem(data.gap))
-            self.table.setItem(row, 4, QTableWidgetItem(data.direct))
-            self.table.setItem(row, 5, QTableWidgetItem(data.bandpass))
-            self.table.setItem(row, 6, QTableWidgetItem(data.one_xa))
-            self.table.setItem(row, 7, QTableWidgetItem(data.one_xp))
-            self.table.setItem(row, 8, QTableWidgetItem(data.two_xa))
-            self.table.setItem(row, 9, QTableWidgetItem(data.two_xp))
-            self.table.setItem(row, 10, QTableWidgetItem(data.nx_amp))
-            self.table.setItem(row, 11, QTableWidgetItem(data.nx_phase))
-            self.table.setItem(row, 12, QTableWidgetItem(data.vpp))
-            self.table.setItem(row, 13, QTableWidgetItem(data.vrms))
+        # Update plots
+        self.update_plots(channel_data, tacho_trigger_data)
