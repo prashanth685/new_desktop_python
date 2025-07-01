@@ -13,6 +13,7 @@ from dashboard.components.console import Console
 from dashboard.components.mqtt_status import MQTTStatus
 from mqtthandler import MQTTHandler
 from features.tabular_view import TabularViewFeature
+from features.polar import PolarPlotFeature
 from features.time_view import TimeViewFeature
 from features.fft_view import FFTViewFeature
 from features.waterfall import WaterfallFeature
@@ -531,6 +532,7 @@ class DashboardWindow(QWidget):
                 "Multiple Trend View": MultiTrendFeature,
                 "Bode Plot": BodePlotFeature,
                 "History Plot": HistoryPlotFeature,
+                "Polar Plot":PolarPlotFeature,
                 "Report": ReportFeature
             }
 

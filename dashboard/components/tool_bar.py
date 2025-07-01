@@ -183,6 +183,7 @@ class ToolBar(QToolBar):
             ("Multiple Trend View", "multi-trend.png", "Access Multiple Trend View Feature"),
             ("Bode Plot", "bode.png", "Access Bode Plot Feature"),
             ("History Plot", "history.png", "Access History Plot Feature"),
+            ("Polar Plot", "polar.png", "Access Polar Plot Feature"),       
             ("Report", "report.png", "Access Report Feature"),
         ]
 

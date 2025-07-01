@@ -119,6 +119,7 @@
 
 import os
 from PIL import Image, ImageDraw
+import math
 
 def create_icon(filename, draw_function, size=(64, 64)):
     # Create a transparent image
@@ -214,6 +215,25 @@ def draw_report(draw, size):
     for y in range(20, h-20, 10):
         draw.line([16, y, w-16, y], fill="#ab47bc", width=1)  # Text lines
 
+def draw_polar_icon(draw, size):
+    w, h = size
+    cx, cy = w // 2, h // 2
+    radius = min(w, h) // 2 - 4  # Leave padding
+
+    # Draw outer circle
+    draw.ellipse([cx - radius, cy - radius, cx + radius, cy + radius], outline="#42a5f5", width=2)
+
+    # Draw radial lines
+    for angle_deg in range(0, 360, 45):  # Every 45 degrees
+        angle_rad = math.radians(angle_deg)
+        x = cx + radius * math.cos(angle_rad)
+        y = cy + radius * math.sin(angle_rad)
+        draw.line([cx, cy, x, y], fill="#42a5f5", width=1)
+
+    # Draw concentric circles
+    for r in range(radius // 3, radius, radius // 3):
+        draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline="#90caf9", width=1)
+
 # Generate all icons
 icon_functions = [
     ("clock.png", draw_clock),
@@ -228,6 +248,7 @@ icon_functions = [
     ("bode.png", draw_bode),
     ("history.png", draw_history),
     ("report.png", draw_report),
+    ("polar.png",draw_polar_icon),
 ]
 
 for filename, draw_func in icon_functions:
