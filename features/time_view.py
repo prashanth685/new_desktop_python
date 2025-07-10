@@ -7,6 +7,7 @@ import time
 import re
 import logging
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TimeAxisItem(AxisItem):
     """Custom axis to display datetime on x-axis."""
@@ -43,7 +44,6 @@ class TimeViewFeature:
         self.is_saving = False
         self.filename_counter = 0
         self.current_filename = None
-
         self.widget = None
         self.plot_widgets = []
         self.plots = []
@@ -52,17 +52,15 @@ class TimeViewFeature:
         self.tacho_times = []
         self.sample_rate = 4096
         self.num_channels = 4
-        self.scaling_factor=3.3/65535
+        self.scaling_factor = 3.3 / 65535
         self.num_plots = 6
         self.channel_samples = 4096
         self.tacho_samples = 4096
-
         self.vlines = []
         self.proxies = []
         self.trackers = []
         self.trigger_lines = []
         self.active_line_idx = None
-
         self.initUI()
         self.load_project_data()
 
@@ -70,15 +68,20 @@ class TimeViewFeature:
         """Load project data to determine number of channels."""
         try:
             project_data = self.db.get_project_data(self.project_name)
-            if project_data and "models" in project_data and self.model_name in project_data["models"]:
-                model_data = project_data["models"][self.model_name]
-                available_channels = len(model_data.get("channels", []))
-                self.num_channels = min(available_channels, 4)
-                logging.debug(f"Loaded project data: {self.num_channels} channels for model {self.model_name}")
-            else:
-                logging.warning(f"No valid model data found for {self.model_name}")
+            if project_data and "models" in project_data:
+                for model in project_data["models"]:
+                    if model.get("name") == self.model_name:
+                        available_channels = len(model.get("channels", []))
+                        self.num_channels = min(available_channels, 4)
+                        logging.debug(f"Loaded project data: {self.num_channels} channels for model {self.model_name}")
+                        return
+                logging.warning(f"No model data found for {self.model_name}")
                 if self.console:
-                    self.console.append_to_console(f"No valid model data for {self.model_name}")
+                    self.console.append_to_console(f"No model data for {self.model_name}")
+            else:
+                logging.warning(f"No valid project data found for {self.project_name}")
+                if self.console:
+                    self.console.append_to_console(f"No valid project data for {self.project_name}")
         except Exception as e:
             logging.error(f"Error loading project data: {str(e)}")
             if self.console:
@@ -95,13 +98,11 @@ class TimeViewFeature:
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
     
-
         colors = ['r', 'g', 'b', 'y', 'c', 'm']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
-            # Set plot widget size: height=250, width=100%
             plot_widget.setFixedHeight(250)
-            plot_widget.setMinimumWidth(0)  # Allow widget to expand to full width
+            plot_widget.setMinimumWidth(0)
             if i < self.num_channels:
                 plot_widget.setLabel('left', f'CH{i+1} Value')
             elif i == self.num_channels:
@@ -109,7 +110,6 @@ class TimeViewFeature:
             else:
                 plot_widget.setLabel('left', 'Tacho Trigger')
                 plot_widget.setYRange(-0.5, 1.5, padding=0)
-            # plot_widget.setLabel('bottom', 'Time')
             plot_widget.showGrid(x=True, y=True)
             plot_widget.addLegend()
             pen = mkPen(color=colors[i % len(colors)], width=2)
@@ -137,7 +137,6 @@ class TimeViewFeature:
 
             scroll_layout.addWidget(plot_widget)
 
-        # Set the scroll content widget and add scroll area to main layout
         scroll_area.setWidget(scroll_content)
         layout.addWidget(scroll_area)
         self.widget.setLayout(layout)
@@ -158,13 +157,11 @@ class TimeViewFeature:
             logging.debug(f"Retrieved filenames from database: {filenames}")
             
             if filenames:
-                # Extract numbers from filenames like 'dataX'
                 numbers = []
                 for f in filenames:
                     match = re.match(r"data(\d+)", f)
                     if match:
                         numbers.append(int(match.group(1)))
-                # Set counter to the highest number + 1, or 1 if no valid numbers found
                 self.filename_counter = max(numbers, default=0) + 1 if numbers else 1
             else:
                 self.filename_counter = 1
@@ -177,7 +174,7 @@ class TimeViewFeature:
             logging.error(f"Error refreshing filenames: {str(e)}")
             if self.console:
                 self.console.append_to_console(f"Error refreshing filenames: {str(e)}")
-            self.filename_counter = 1  # Fallback to 1 on error
+            self.filename_counter = 1
             return []
 
     def start_saving(self):
@@ -188,7 +185,6 @@ class TimeViewFeature:
                 self.console.append_to_console("Cannot start saving: No project or model selected")
             return
         
-        # Refresh filenames to ensure the counter is up-to-date
         self.refresh_filenames()
         
         self.is_saving = True
@@ -205,13 +201,11 @@ class TimeViewFeature:
         logging.info(f"Stopped saving data, new filename counter: {self.filename_counter}")
         if self.console:
             self.console.append_to_console(f"Stopped saving data, next filename counter: {self.filename_counter}")
-        # Notify other components to refresh filenames
         try:
             self.parent.sub_tool_bar.refresh_filenames()
         except AttributeError:
             logging.warning("No sub_tool_bar found to refresh filenames")
             
-    
     def on_data_received(self, tag_name, model_name, values, sample_rate):
         """Handle incoming MQTT data, update plots, and save to database if saving is enabled."""
         logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "
@@ -251,12 +245,10 @@ class TimeViewFeature:
             self.channel_times = np.array([current_time - (self.channel_samples - 1) * channel_time_step + i * channel_time_step for i in range(self.channel_samples)])
             self.tacho_times = np.array([current_time - (self.tacho_samples - 1) * tacho_time_step + i * tacho_time_step for i in range(self.tacho_samples)])
 
-            # Apply scaling factor to channel data
             for ch in range(self.num_channels):
                 self.data[ch] = np.array(values[ch][:self.channel_samples]) * self.scaling_factor
                 logging.debug(f"Channel {ch+1} data: {len(self.data[ch])} samples, scaled with factor {self.scaling_factor}")
 
-            # Assign tacho data without scaling
             self.data[self.num_channels] = np.array(values[4][:self.tacho_samples]) / 100
             self.data[self.num_channels + 1] = np.array(values[5][:self.tacho_samples])
             logging.debug(f"Tacho freq data: {len(self.data[self.num_channels])} samples")
@@ -298,13 +290,12 @@ class TimeViewFeature:
                         self.plot_widgets[self.num_plots - 1].addItem(line)
                         self.trigger_lines.append(line)
 
-            # Save data to database if saving is enabled
             if self.is_saving:
                 try:
                     message_data = {
                         "topic": tag_name,
                         "filename": self.current_filename,
-                        "frameIndex": 0,  # Assuming a single frame for simplicity
+                        "frameIndex": 0,
                         "message": {
                             "channel_data": [list(self.data[i]) for i in range(self.num_channels)],
                             "tacho_freq": list(self.data[self.num_channels]),

@@ -1,8 +1,8 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea,QApplication
-import sys
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea, QComboBox, QApplication
 from PyQt5.QtCore import Qt
+import sys
+import datetime
 import logging
-
 
 app = QApplication(sys.argv)
 
@@ -45,6 +45,9 @@ class CreateProjectWidget(QWidget):
         self.parent = parent
         self.db = parent.db
         self.models = []
+        self.available_types = ["Displacement", "Acc/Vel"]
+        self.available_directions = ["Right", "Left"]
+        self.available_channel_counts = ["DAQ4CH", "DAQ8CH", "DAQ10CH"]
         self.initUI()
 
     def initUI(self):
@@ -154,7 +157,28 @@ class CreateProjectWidget(QWidget):
                 border-color: #93c5fd;
             }
         """)
-        project_form.addRow(self.project_name_input)
+        project_form.addRow("Project Name:", self.project_name_input)
+
+        self.channel_count_combo = QComboBox()
+        self.channel_count_combo.addItems(self.available_channel_counts)
+        self.channel_count_combo.setStyleSheet("""
+            QComboBox {
+                border: 1px solid #d1d5db;
+                border-radius: 4px;
+                padding: 8px;
+                font-size: 14px;
+                min-width: 400px;
+                background-color: #ffffff;
+            }
+            QComboBox:focus {
+                border-color: #3b82f6;
+                outline: none;
+            }
+            QComboBox:hover {
+                border-color: #93c5fd;
+            }
+        """)
+        project_form.addRow("Channel Count:", self.channel_count_combo)
         card_layout.addLayout(project_form)
 
         add_model_button = QPushButton("+ Add Model")
@@ -233,6 +257,9 @@ class CreateProjectWidget(QWidget):
         card_layout.addLayout(button_layout)
 
     def add_model_input(self):
+        channel_count = self.channel_count_combo.currentText()
+        num_channels = {"DAQ4CH": 4, "DAQ8CH": 8, "DAQ10CH": 10}.get(channel_count, 4)
+
         model_widget = QWidget()
         model_widget.setStyleSheet("""
             background-color: #fafafa;
@@ -285,7 +312,7 @@ class CreateProjectWidget(QWidget):
             QLineEdit {
                 border: 1px solid #d1d5db;
                 border-radius: 4px;
-                padding: 8px;
+                padding:8px;
                 font-size: 14px;
                 min-width: 400px;
                 background-color: #ffffff;
@@ -298,7 +325,7 @@ class CreateProjectWidget(QWidget):
                 border-color: #93c5fd;
             }
         """)
-        model_form.addRow(model_name_input)
+        model_form.addRow("Model Name:", model_name_input)
 
         tag_name_input = QLineEdit()
         tag_name_input.setPlaceholderText("Tag name")
@@ -319,7 +346,7 @@ class CreateProjectWidget(QWidget):
                 border-color: #93c5fd;
             }
         """)
-        model_form.addRow(tag_name_input)
+        model_form.addRow("Tag Name:", tag_name_input)
         model_layout.addLayout(model_form)
 
         channels_label = QLabel("Channels")
@@ -332,20 +359,20 @@ class CreateProjectWidget(QWidget):
         """)
         model_layout.addWidget(channels_label)
 
-        # Create a container for channel inputs
         channel_container = QWidget()
         channel_layout = QVBoxLayout()
         channel_layout.setSpacing(12)
         channel_container.setLayout(channel_layout)
         model_layout.addWidget(channel_container)
 
-        # Track channel inputs for this model
         channel_inputs = []
 
         def add_channel_input():
             channel_widget = QWidget()
-            channel_form = QHBoxLayout()
+            channel_form = QFormLayout()
             channel_form.setSpacing(12)
+            channel_form.setLabelAlignment(Qt.AlignLeft)
+            channel_form.setFormAlignment(Qt.AlignCenter)
             channel_widget.setLayout(channel_form)
 
             channel_name_input = QLineEdit()
@@ -367,7 +394,196 @@ class CreateProjectWidget(QWidget):
                     border-color: #93c5fd;
                 }
             """)
-            channel_form.addWidget(channel_name_input)
+            channel_form.addRow("Channel Name:", channel_name_input)
+
+            type_combo = QComboBox()
+            type_combo.addItems(self.available_types)
+            type_combo.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QComboBox:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QComboBox:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Type:", type_combo)
+
+            sensitivity_input = QLineEdit()
+            sensitivity_input.setPlaceholderText("Sensitivity")
+            sensitivity_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Sensitivity:", sensitivity_input)
+
+            unit_input = QLineEdit()
+            unit_input.setPlaceholderText("Unit")
+            unit_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Unit:", unit_input)
+
+            correction_value_input = QLineEdit()
+            correction_value_input.setPlaceholderText("Correction Value")
+            correction_value_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Correction Value:", correction_value_input)
+
+            gain_input = QLineEdit()
+            gain_input.setPlaceholderText("Gain")
+            gain_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Gain:", gain_input)
+
+            unit_type_input = QLineEdit()
+            unit_type_input.setPlaceholderText("Unit Type")
+            unit_type_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Unit Type:", unit_type_input)
+
+            angle_input = QLineEdit()
+            angle_input.setPlaceholderText("Angle")
+            angle_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Angle:", angle_input)
+
+            angle_direction_combo = QComboBox()
+            angle_direction_combo.addItems(self.available_directions)
+            angle_direction_combo.setStyleSheet("""
+                QComboBox {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QComboBox:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QComboBox:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Angle Direction:", angle_direction_combo)
+
+            shaft_input = QLineEdit()
+            shaft_input.setPlaceholderText("Shaft")
+            shaft_input.setStyleSheet("""
+                QLineEdit {
+                    border: 1px solid #d1d5db;
+                    border-radius: 4px;
+                    padding: 8px;
+                    font-size: 14px;
+                    min-width: 400px;
+                    background-color: #ffffff;
+                }
+                QLineEdit:focus {
+                    border-color: #3b82f6;
+                    outline: none;
+                }
+                QLineEdit:hover {
+                    border-color: #93c5fd;
+                }
+            """)
+            channel_form.addRow("Shaft:", shaft_input)
 
             remove_channel_button = QPushButton("- Remove")
             remove_channel_button.setStyleSheet("""
@@ -386,21 +602,36 @@ class CreateProjectWidget(QWidget):
                 }
             """)
             remove_channel_button.clicked.connect(lambda: remove_channel(channel_widget))
-            channel_form.addWidget(remove_channel_button)
+            channel_form.addRow("", remove_channel_button)
 
-            channel_inputs.append((channel_widget, channel_name_input))
+            channel_inputs.append((
+                channel_widget,
+                channel_name_input,
+                type_combo,
+                sensitivity_input,
+                unit_input,
+                correction_value_input,
+                gain_input,
+                unit_type_input,
+                angle_input,
+                angle_direction_combo,
+                shaft_input
+            ))
             channel_layout.addWidget(channel_widget)
             channel_container.adjustSize()
 
         def remove_channel(channel_widget):
             if len(channel_inputs) > 1:
-                for widget, _ in channel_inputs:
-                    if widget == channel_widget:
-                        channel_inputs.remove((widget, _))
-                        channel_layout.removeWidget(widget)
-                        widget.deleteLater()
+                for inputs in channel_inputs:
+                    if inputs[0] == channel_widget:
+                        channel_inputs.remove(inputs)
+                        channel_layout.removeWidget(channel_widget)
+                        channel_widget.deleteLater()
                         channel_container.adjustSize()
                         break
+
+        for _ in range(num_channels):
+            add_channel_input()
 
         add_channel_button = QPushButton("+ Add Channel")
         add_channel_button.setStyleSheet("""
@@ -421,17 +652,18 @@ class CreateProjectWidget(QWidget):
         add_channel_button.clicked.connect(add_channel_input)
         model_layout.addWidget(add_channel_button)
 
-        add_channel_input()  # Add the first channel by default
-        self.model_inputs.append((model_widget, model_name_input, tag_name_input, channel_inputs))
+        self.model_inputs.append((model_widget, model_name_input, tag_name_input, channel_inputs, channel_count))
         self.model_layout.addWidget(model_widget)
 
     def remove_model_input(self, model_widget):
         if len(self.model_inputs) > 1:
-            for widget, _, _, _ in self.model_inputs:
-                if widget == model_widget:
-                    self.model_inputs.remove((widget, _, _, _))
-                    self.model_layout.removeWidget(widget)
-                    widget.deleteLater()
+            for inputs in self.model_inputs:
+                if inputs[0] == model_widget:
+                    self.model_inputs.remove(inputs)
+                    self.model_layout.removeWidget(model_widget)
+                    model_widget.deleteLater()
+                    for i, (widget, _, _, _, _) in enumerate(self.model_inputs):
+                        widget.layout().itemAt(0).layout().itemAt(0).widget().setText(f"Model {i + 1}")
                     break
 
     def create_project(self):
@@ -440,43 +672,62 @@ class CreateProjectWidget(QWidget):
             QMessageBox.warning(self, "Error", "Project name cannot be empty!")
             return
 
+        # Check if project already exists
+        if self.db.projects_collection.find_one({"project_name": project_name, "email": self.db.email}):
+            QMessageBox.warning(self, "Error", "A project with this name already exists!")
+            return
+
+        if not self.model_inputs:
+            QMessageBox.warning(self, "Error", "At least one model is required!")
+            return
+
         self.models = []
-        for _, model_name_input, tag_name_input, channel_inputs in self.model_inputs:
+        for _, model_name_input, tag_name_input, channel_inputs, channel_count in self.model_inputs:
             model_name = model_name_input.text().strip()
             tag_name = tag_name_input.text().strip()
             if not model_name:
-                QMessageBox.warning(self, "Error", "Model name cannot be empty!")
-                return
-            if not tag_name:
-                QMessageBox.warning(self, "Error", f"Tag name cannot be empty for model '{model_name}'!")
+                QMessageBox.warning(self, "Error", f"Model name cannot be empty for model {len(self.models) + 1}!")
                 return
 
             channels = []
-            for _, channel_name_input in channel_inputs:
+            for _, channel_name_input, type_combo, sensitivity_input, unit_input, correction_value_input, gain_input, unit_type_input, angle_input, angle_direction_combo, shaft_input in channel_inputs:
                 channel_name = channel_name_input.text().strip()
                 if not channel_name:
                     QMessageBox.warning(self, "Error", f"Channel name cannot be empty for model '{model_name}'!")
                     return
-                channels.append({"channel_name": channel_name})
+                channels.append({
+                    "channelName": channel_name,
+                    "type": type_combo.currentText(),
+                    "sensitivity": sensitivity_input.text().strip(),
+                    "unit": unit_input.text().strip(),
+                    "correctionValue": correction_value_input.text().strip(),
+                    "gain": gain_input.text().strip(),
+                    "unitType": unit_type_input.text().strip(),
+                    "angle": angle_input.text().strip(),
+                    "angleDirection": angle_direction_combo.currentText(),
+                    "shaft": shaft_input.text().strip()
+                })
 
             if not channels:
                 QMessageBox.warning(self, "Error", f"At least one channel is required for model '{model_name}'!")
                 return
 
-            self.models.append({"name": model_name, "tag_name": tag_name, "channels": channels})
-
-        if not self.models:
-            QMessageBox.warning(self, "Error", "At least one model with a tag and channels is required!")
-            return
+            self.models.append({
+                "name": f"{channel_count}_{model_name}",
+                "tagName": tag_name,
+                "channels": channels
+            })
 
         try:
-            models_for_db = [{"name": model["name"], "channels": model["channels"]} for model in self.models]
-            success, message = self.db.create_project(project_name, models_for_db)
+            project_data = {
+                "project_name": project_name,
+                "email": self.db.email,
+                "createdAt": datetime.datetime.now().isoformat(),
+                "models": self.models
+            }
+            success, message = self.db.create_project(project_name, self.models)
             if success:
-                for model in self.models:
-                    tag_data = {"tag_name": model["tag_name"]}
-                    self.db.add_tag(project_name, model["name"], tag_data)
-                QMessageBox.information(self, "Success", message)
+                QMessageBox.information(self, "Success", "Project created successfully!")
                 logging.info(f"Created new project: {project_name} with {len(self.models)} models")
                 logging.debug(f"Calling load_project for project: {project_name}")
                 self.parent.load_project(project_name)

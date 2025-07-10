@@ -36,6 +36,7 @@ class FileBar(QToolBar):
         actions = [
             ("Home", "Go to Dashboard Home", self.parent.display_dashboard),
             ("Open", "Open an Existing Project", self.parent.open_project),
+            ("Edit","Edit an Existing Project",self.parent.edit_project_dialog),
             ("New", "Create a New Project", self.parent.create_project),
             ("Save", "Save Current Project Data", self.parent.save_action),
             ("Settings", "Open Application Settings", self.parent.settings_action),

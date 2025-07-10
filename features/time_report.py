@@ -1,6 +1,5 @@
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QComboBox, QLabel, QPushButton, QScrollArea, QDateTimeEdit, QGridLayout)
 from PyQt5.QtWidgets import QApplication
-
 from PyQt5.QtCore import QPropertyAnimation, QEasingCurve, Qt, QDateTime, QRect, pyqtSignal, QEvent, QObject, QTimer
 from PyQt5.QtGui import QPainter, QPen, QBrush, QColor
 import pyqtgraph as pg
@@ -8,6 +7,8 @@ from pyqtgraph import PlotWidget, mkPen, AxisItem, InfiniteLine, SignalProxy
 import numpy as np
 from datetime import datetime, timedelta
 import logging
+
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class QRangeSlider(QWidget):
     """Custom dual slider widget for selecting a time range."""
@@ -38,7 +39,7 @@ class QRangeSlider(QWidget):
 
     def setValues(self, left, right):
         self.left_value = max(self.min_value, min(left, self.max_value))
-        self.right_value = max(self.min_value, min(right, self.max_value))
+        self.right_value = max(self.left_value + 1, min(right, self.max_value))
         self.update()
         self.valueChanged.emit()
 
@@ -155,7 +156,6 @@ class TimeReportFeature:
     def init_ui_deferred(self):
         """Initialize UI components immediately and defer data loading."""
         self.setup_basic_ui()
-        # Defer heavy initialization tasks
         QTimer.singleShot(0, self.load_data_async)
 
     def setup_basic_ui(self):
@@ -163,18 +163,15 @@ class TimeReportFeature:
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        # Header
         header = QLabel(f"TIME REPORT FOR {self.project_name.upper()}")
         header.setStyleSheet("color: black; font-size: 26px; font-weight: bold; padding: 8px;")
         layout.addWidget(header, alignment=Qt.AlignCenter)
 
-        # Controls container
         controls_widget = QWidget()
         controls_widget.setStyleSheet("background-color: #d1d6d9; border-radius: 5px; padding: 10px;")
         controls_layout = QVBoxLayout()
         controls_widget.setLayout(controls_layout)
 
-        # File selection layout
         file_layout = QHBoxLayout()
         file_label = QLabel(f"Select Saved File (Model: {self.model_name or 'None'}, Channel: {self.channel or 'All'}):")
         file_label.setStyleSheet("color: black; font-size: 16px; font: bold")
@@ -254,7 +251,6 @@ class TimeReportFeature:
         file_layout.addStretch()
         controls_layout.addLayout(file_layout)
 
-        # Time range selection layout
         time_range_layout = QHBoxLayout()
         start_time_label = QLabel("Select Start Time:")
         start_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
@@ -277,7 +273,6 @@ class TimeReportFeature:
         time_range_layout.addStretch()
         controls_layout.addLayout(time_range_layout)
 
-        # Slider layout
         slider_layout = QGridLayout()
         slider_label = QLabel("Drag Time Range:")
         slider_label.setStyleSheet("color: black; font-size: 14px; font: bold")
@@ -289,7 +284,6 @@ class TimeReportFeature:
         slider_layout.setColumnStretch(1, 1)
         controls_layout.addLayout(slider_layout)
 
-        # Time info layout
         time_info_layout = QHBoxLayout()
         self.start_time_label = QLabel("File Start Time: Loading...")
         self.start_time_label.setStyleSheet("color: black; font-size: 14px; font: bold")
@@ -302,7 +296,6 @@ class TimeReportFeature:
 
         layout.addWidget(controls_widget)
 
-        # Placeholder for graph container
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setStyleSheet("""
@@ -335,7 +328,6 @@ class TimeReportFeature:
         self.scroll_area.setWidget(self.scroll_content)
         layout.addWidget(self.scroll_area, stretch=1)
 
-        # Disable controls until data is loaded
         self.file_combo.setEnabled(False)
         self.start_time_edit.setEnabled(False)
         self.end_time_edit.setEnabled(False)
@@ -345,9 +337,7 @@ class TimeReportFeature:
     def load_data_async(self):
         """Asynchronously load data and initialize plots."""
         try:
-            # Initialize plots
             self.init_plots()
-            # Load filenames
             self.refresh_filenames()
         except Exception as e:
             logging.error(f"Error in async data loading: {str(e)}")
@@ -395,7 +385,7 @@ class TimeReportFeature:
             self.trackers.append(tracker)
 
             self.scroll_layout.addWidget(plot_widget)
-            QApplication.processEvents()  # Allow UI updates between widget creations
+            QApplication.processEvents()
 
     def animate_button_press(self):
         """Animate button press effect."""
@@ -649,7 +639,6 @@ class TimeReportFeature:
                     self.console.append_to_console("Error: Start time must be before end time.")
                 return
 
-            # Filter messages by time range and sort by timestamp
             filtered_messages = [
                 msg for msg in messages
                 if self.start_time <= datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp() <= self.end_time
@@ -662,7 +651,6 @@ class TimeReportFeature:
                     self.console.append_to_console(f"No data within time range for filename {filename}")
                 return
 
-            # Initialize lists to aggregate data
             channel_data_agg = [[] for _ in range(self.num_channels)]
             tacho_freq_agg = []
             tacho_trigger_agg = []
@@ -670,7 +658,6 @@ class TimeReportFeature:
             tacho_times_agg = []
             self.sample_rate = filtered_messages[0].get('samplingRate', 4096)
 
-            # Aggregate data from all messages
             for msg in filtered_messages:
                 created_at = datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp()
                 channel_data = msg['message']['channel_data']
@@ -679,13 +666,11 @@ class TimeReportFeature:
                 channel_samples = msg.get('samplingSize', 4096)
                 tacho_samples = len(tacho_freq)
 
-                # Validate data lengths
                 if len(channel_data) != self.num_channels or len(tacho_freq) != tacho_samples or len(tacho_trigger) != tacho_samples:
                     if self.console:
                         self.console.append_to_console(f"Data length mismatch in message at {created_at} for {filename}")
                     continue
 
-                # Generate time arrays for this message
                 channel_time_step = 1.0 / self.sample_rate
                 tacho_time_step = 1.0 / self.sample_rate
                 channel_times = np.array([
@@ -697,11 +682,9 @@ class TimeReportFeature:
                     for i in range(tacho_samples)
                 ])
 
-                # Filter times within the selected range
                 channel_mask = (channel_times >= self.start_time) & (channel_times <= self.end_time)
                 tacho_mask = (tacho_times >= self.start_time) & (tacho_times <= self.end_time)
 
-                # Append filtered data
                 for ch in range(self.num_channels):
                     channel_data_agg[ch].extend(np.array(channel_data[ch])[channel_mask])
                 tacho_freq_agg.extend(np.array(tacho_freq)[tacho_mask])
@@ -709,7 +692,6 @@ class TimeReportFeature:
                 channel_times_agg.extend(channel_times[channel_mask])
                 tacho_times_agg.extend(tacho_times[tacho_mask])
 
-            # Convert aggregated lists to numpy arrays
             for ch in range(self.num_channels):
                 self.data[ch] = np.array(channel_data_agg[ch])
             self.data[self.num_channels] = np.array(tacho_freq_agg)
@@ -717,7 +699,6 @@ class TimeReportFeature:
             self.channel_times = np.array(channel_times_agg)
             self.tacho_times = np.array(tacho_times_agg)
 
-            # Clear existing plots
             for widget in self.plot_widgets:
                 widget.clear()
                 widget.addLegend()
@@ -725,7 +706,6 @@ class TimeReportFeature:
                 if widget.getAxis('left').labelText == 'Tacho Trigger':
                     widget.setYRange(-0.5, 1.5, padding=0)
 
-            # Plot the aggregated data
             colors = ['r', 'g', 'b', 'y', 'c', 'm']
             for ch in range(self.num_plots):
                 times = self.tacho_times if ch >= self.num_channels else self.channel_times
@@ -741,7 +721,6 @@ class TimeReportFeature:
                     if self.console:
                         self.console.append_to_console(f"No data for plot {ch} in time range")
 
-            # Plot trigger lines
             if len(self.data[self.num_plots - 1]) > 0:
                 trigger_indices = np.where(self.data[self.num_plots - 1] == 1)[0]
                 self.trigger_lines = [None] * (self.num_plots - 1) + [[]]

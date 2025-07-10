@@ -29,7 +29,6 @@ from select_project import SelectProjectWidget
 from create_project import CreateProjectWidget
 from project_structure import ProjectStructureWidget
 
-
 class DashboardWindow(QWidget):
     mqtt_status_changed = pyqtSignal(bool)  # Signal for MQTT connection status changes
 
@@ -282,9 +281,10 @@ class DashboardWindow(QWidget):
                 logging.warning(f"No models found for project: {self.current_project}")
                 return []
             tags = []
-            for model_name, model_data in project_data["models"].items():
-                tag_name = model_data.get("tagName", "")
-                if tag_name:
+            for model in project_data["models"]:
+                model_name = model.get("name")
+                tag_name = model.get("tagName", "")
+                if tag_name and model_name:
                     tags.append({"tag_name": tag_name, "model_name": model_name})
             logging.debug(f"Retrieved tags for project {self.current_project}: {tags}")
             return tags
@@ -532,7 +532,7 @@ class DashboardWindow(QWidget):
                 "Multiple Trend View": MultiTrendFeature,
                 "Bode Plot": BodePlotFeature,
                 "History Plot": HistoryPlotFeature,
-                "Polar Plot":PolarPlotFeature,
+                "Polar Plot": PolarPlotFeature,
                 "Report": ReportFeature
             }
 

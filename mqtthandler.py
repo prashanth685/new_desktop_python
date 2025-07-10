@@ -28,9 +28,9 @@ class MQTTHandler(QObject):
             project_data = self.db.get_project_data(self.project_name)
             model_name = None
             if project_data and "models" in project_data:
-                for m_name, m_data in project_data["models"].items():
-                    if m_data.get("tagName") == topic:
-                        model_name = m_name
+                for model in project_data["models"]:
+                    if model.get("tagName") == topic:
+                        model_name = model.get("name")
                         break
             logging.debug(f"Parsed topic {topic}: project_name={self.project_name}, model_name={model_name}, tag_name={tag_name}")
             return self.project_name, model_name, tag_name
@@ -110,7 +110,7 @@ class MQTTHandler(QObject):
                 expected_main = samples_per_channel * num_channels
                 expected_tacho = 4096 * num_tacho_channels
                 expected_total = expected_main + expected_tacho
-                logging.debug(f" total values comming {expected_total}") 
+                logging.debug(f" total values coming {expected_total}") 
 
                 if len(total_values) != expected_total:
                     logging.warning(f"Unexpected data length: got {len(total_values)}, expected {expected_total}")
@@ -149,8 +149,8 @@ class MQTTHandler(QObject):
     def subscribe_to_topics(self):
         try:
             project_data = self.db.get_project_data(self.project_name)
-            for model_name, model_data in project_data.get("models", {}).items():
-                tag_name = model_data.get("tagName", "")
+            for model in project_data.get("models", []):
+                tag_name = model.get("tagName", "")
                 if tag_name and tag_name not in self.subscribed_topics:
                     self.client.subscribe(tag_name)
                     self.subscribed_topics.append(tag_name)

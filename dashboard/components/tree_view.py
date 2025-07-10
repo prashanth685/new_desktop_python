@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox, QWidget, QVBoxLayout,QSizePolicy
+from PyQt5.QtWidgets import QTreeWidget, QTreeWidgetItem, QMessageBox, QWidget, QVBoxLayout, QSizePolicy
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor
 import logging
@@ -24,11 +24,10 @@ class TreeView(QWidget):
             QTreeWidget::item:selected { background-color: #4a90e2; color: white; }
         """)
         self.tree.setFixedWidth(300)
-        self.setFixedWidth(300)         # Fix the entire TreeView width
+        self.setFixedWidth(300)
         self.setMinimumWidth(300)
         self.setMaximumWidth(300)
         self.tree.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
-
 
         self.tree.itemClicked.connect(self.handle_item_clicked)
 
@@ -50,16 +49,19 @@ class TreeView(QWidget):
                 logging.warning(f"No models found for project: {project_name}")
                 return
 
-            models = project_data.get("models", {})
+            models = project_data.get("models", [])
             if not models:
-                logging.warning(f"Empty models dictionary for project: {project_name}")
+                logging.warning(f"Empty models list for project: {project_name}")
                 return
 
-            for model_name, model_data in models.items():
-                # Use model_name as the key and extract metadata
-                model_item = QTreeWidgetItem(project_item)
-                model_item.setExpanded(True)  # inside the model loop
+            for model in models:
+                model_name = model.get("name", "")
+                if not model_name:
+                    logging.warning(f"Model without name in project: {project_name}")
+                    continue
 
+                model_item = QTreeWidgetItem(project_item)
+                model_item.setExpanded(True)
                 model_item.setText(0, f"🖥️ {model_name}")
                 model_item.setData(0, Qt.UserRole, {
                     "type": "model",
@@ -67,11 +69,11 @@ class TreeView(QWidget):
                     "project": project_name
                 })
 
-                # Add channels from model_data
-                channels = model_data.get("channels", [])
+                # Add channels from model
+                channels = model.get("channels", [])
                 for channel in channels:
-                    channel_name = channel.get("channel_name", f"Channel_{len(channels)+1}")
-                    tag_name = channel.get("tag_name", channel_name)
+                    channel_name = channel.get("channelName", f"Channel_{len(channels)+1}")
+                    tag_name = model.get("tagName", channel_name)  # Use model-level tagName
                     channel_item = QTreeWidgetItem(model_item)
                     channel_item.setText(0, f"📡 {channel_name}")
                     channel_item.setData(0, Qt.UserRole, {
@@ -90,25 +92,22 @@ class TreeView(QWidget):
         data = item.data(0, Qt.UserRole)
         try:
             if self.selected_channel_item and self.selected_channel_item != item:
-                self.selected_channel_item.setBackground(0, QColor("#1e2937"))
+                self.selected_channel_item.setBackground(0, QColor("#232629"))
 
             if data["type"] == "project":
                 self.selected_channel = None
                 self.selected_channel_item = None
                 self.selected_model = None
-                # No feature to display when project is clicked
             elif data["type"] == "model":
                 self.selected_channel = None
                 self.selected_channel_item = None
                 self.selected_model = data["name"]
-                # Display Time View by default when a model is selected
-                # self.parent_widget.display_feature_content("Time View", self.project_name)
             elif data["type"] == "channel":
                 self.selected_channel = data["name"]
                 self.selected_channel_item = item
                 self.selected_model = data["model"]
                 item.setBackground(0, QColor("#28a745"))
-                # self.parent_widget.display_feature_content("Time View", self.project_name)
+
             logging.info(f"Tree item clicked: {data['type']} - {data.get('name', 'Unknown')}, selected channel: {self.selected_channel}, selected model: {self.selected_model}")
         except Exception as e:
             logging.error(f"Error handling tree item click: {str(e)}")

@@ -10,7 +10,7 @@ class OrbitFeature:
         self.parent = parent
         self.db = db
         self.project_name = project_name
-        self.selected_channel = channel  # Selected channel from tree view (e.g., "Channel_1")
+        self.selected_channel = channel  # Selected channel from TreeView (e.g., "Channel_1")
         self.model_name = model_name
         self.console = console
         self.widget = None
@@ -21,7 +21,7 @@ class OrbitFeature:
         self.time_plots = []
         self.cross_lines = []
         self.channel_data = [[] for _ in range(4)]  # Store data for 4 channels
-        self.selected_pairs = []  # Will be set based on selected channel
+        self.selected_pair = None  # Single pair (ch_x, ch_y)
         self.cross_pair = None
         self.sample_rate = 4096
         self.samples_per_channel = 4096
@@ -36,22 +36,17 @@ class OrbitFeature:
         main_layout = QVBoxLayout()
         self.widget.setLayout(main_layout)
 
-        # Label
-        # label = QLabel(f"Orbit Plot for Model: {self.model_name if self.model_name else 'None'}")
-        # main_layout.addWidget(label)
-
         # Channel selection combo box
         self.combo = QComboBox()
         self.combo.setStyleSheet("""
             QComboBox {
                 font-size: 16px;
                 padding: 5px;
-                background-color:white;
+                background-color: white;
             }
             QComboBox QAbstractItemView {
                 font-size: 16px;
-                background-color:white;
-                                 
+                background-color: white;
             }
         """)
         self.update_combo_options()
@@ -63,36 +58,29 @@ class OrbitFeature:
         main_layout.addLayout(self.plot_layout)
 
         # Initialize with default pair based on selected channel
-        self.set_default_pairs()
+        self.set_default_pair()
         self.recreate_plots()
+        self.update_plots_with_sine_data()
 
         if not self.model_name and self.console:
             self.console.append_to_console("No model selected in OrbitFeature.")
 
     def update_combo_options(self):
-        """Update combo box options based on selected channel."""
+        """Update combo box options to show channels other than the selected one."""
         self.combo.clear()
         channel_idx = self.get_channel_index(self.selected_channel)
         options = []
         if channel_idx is not None:
-            # Options for pairs including the selected channel
+            # List all channels except the selected one
             other_channels = [i for i in range(4) if i != channel_idx]
             for other in other_channels:
-                pair_name = f"Channels {channel_idx+1} & {other+1}"
-                options.append(pair_name)
-            # Add option for all channels if not already included
-            options.append("Channels 1, 2, 3 & 4")
+                options.append(f"Channel {other+1}")
         else:
-            # Default options if no channel is selected
-            options = [
-                "Channels 1 & 2",
-                "Channels 3 & 4",
-                "Channels 1 & 3",
-                "Channels 1 & 4",
-                "Channels 2 & 3",
-                "Channels 2 & 4",
-            ]
+            # Default to all channels except Channel_1
+            options = ["Channel 2", "Channel 3", "Channel 4"]
         self.combo.addItems(options)
+        if self.console:
+            self.console.append_to_console(f"Updated combo options: {options}")
 
     def get_channel_index(self, channel_name):
         """Convert channel name to index (0-based)."""
@@ -103,52 +91,45 @@ class OrbitFeature:
         except:
             return None
 
-    def set_default_pairs(self):
-        """Set default channel pairs based on selected channel."""
+    def set_default_pair(self):
+        """Set default channel pair based on selected channel."""
         channel_idx = self.get_channel_index(self.selected_channel)
         if channel_idx is not None:
-            # Default to pairing with the next channel (e.g., Ch1 with Ch2, Ch2 with Ch1 or Ch3)
-            if channel_idx == 0:
-                self.selected_pairs = [(0, 1)]  # Ch1 vs Ch2
-            elif channel_idx == 1:
-                self.selected_pairs = [(1, 0)]  # Ch2 vs Ch1
-            elif channel_idx == 2:
-                self.selected_pairs = [(2, 3)]  # Ch3 vs Ch4
-            elif channel_idx == 3:
-                self.selected_pairs = [(3, 2)]  # Ch4 vs Ch3
-            self.cross_pair = self.selected_pairs[0] if self.selected_pairs[0] in [(0, 2), (0, 3), (1, 2), (1, 3)] else None
+            # Default to pairing with the next channel (cycling through available channels)
+            other_channels = [i for i in range(4) if i != channel_idx]
+            # Choose the first available channel
+            default_other = other_channels[0] if other_channels else 0
+            self.selected_pair = (channel_idx, default_other)
         else:
-            self.selected_pairs = [(0, 1)]  # Default to Ch1 vs Ch2
-            self.cross_pair = None
+            # Default to Ch1 vs Ch2
+            self.selected_pair = (0, 1)
+        self.cross_pair = self.selected_pair if self.selected_pair in [(0, 2), (0, 3), (1, 2), (1, 3)] else None
+        if self.console:
+            self.console.append_to_console(f"Set default pair: {self.selected_pair}, cross pair: {self.cross_pair}")
 
     def on_combo_changed(self, index):
-        """Handle channel pair selection from combo box."""
+        """Handle channel selection from combo box."""
         channel_idx = self.get_channel_index(self.selected_channel)
-        pair_map = {}
         if channel_idx is not None:
             other_channels = [i for i in range(4) if i != channel_idx]
-            for i, other in enumerate(other_channels):
-                pair_map[i] = [(channel_idx, other)]
-            pair_map[len(other_channels)] = [(0, 1), (2, 3)]  # All channels
+            selected_other = other_channels[index] if index < len(other_channels) else other_channels[0]
+            self.selected_pair = (channel_idx, selected_other)
         else:
+            # Map combo box index to pairs (default case)
             pair_map = {
-                0: [(0, 1)],  # Ch1 vs Ch2
-                1: [(2, 3)],  # Ch3 vs Ch4
-                2: [(0, 2)],  # Ch1 vs Ch3
-                3: [(0, 3)],  # Ch1 vs Ch4
-                4: [(1, 2)],  # Ch2 vs Ch3
-                5: [(1, 3)],  # Ch2 vs Ch4
-                6: [(0, 1), (2, 3)]  # All channels
+                0: (0, 1),  # Ch1 vs Ch2
+                1: (0, 2),  # Ch1 vs Ch3
+                2: (0, 3),  # Ch1 vs Ch4
             }
-        self.selected_pairs = pair_map.get(index, [(0, 1)])
-        self.cross_pair = self.selected_pairs[0] if len(self.selected_pairs) == 1 and self.selected_pairs[0] in [(0, 2), (0, 3), (1, 2), (1, 3)] else None
+            self.selected_pair = pair_map.get(index, (0, 1))
+        self.cross_pair = self.selected_pair if self.selected_pair in [(0, 2), (0, 3), (1, 2), (1, 3)] else None
         self.recreate_plots()
         self.update_plots_with_sine_data()
         if self.console:
-            self.console.append_to_console(f"Selected channel pairs: {self.selected_pairs}, cross pair: {self.cross_pair}")
+            self.console.append_to_console(f"Selected channel pair: {self.selected_pair}, cross pair: {self.cross_pair}")
 
     def recreate_plots(self):
-        """Recreate orbit and time-domain plot widgets based on selected pairs."""
+        """Recreate orbit and time-domain plot widgets for the selected pair."""
         # Clear existing widgets
         for plot_widget in self.plot_widgets + self.time_plot_widgets:
             plot_widget.deleteLater()
@@ -168,41 +149,40 @@ class OrbitFeature:
                 item.layout().deleteLater()
 
         # Create new plot widgets
-        colors = ['b', 'g']
+        colors = ['b']
         time_colors = ['r', 'g', 'b', 'y']
-        channels_to_plot = set()
-        for ch_x, ch_y in self.selected_pairs:
-            channels_to_plot.add(ch_x)
-            channels_to_plot.add(ch_y)
+        if not self.selected_pair:
+            return
+        ch_x, ch_y = self.selected_pair
+        channels_to_plot = {ch_x, ch_y}
 
-        # Orbit plots
-        for i, (ch_x, ch_y) in enumerate(self.selected_pairs):
-            plot_widget = pg.PlotWidget()
-            plot_widget.setBackground('w')  # Set white background
-            plot_widget.setFixedSize(500, 500)  # Increased size
-            self.plot_layout.addWidget(plot_widget)
-            plot_item = plot_widget.getPlotItem()
-            plot_item.setTitle(f"Orbit Plot (Ch {ch_y+1} vs Ch {ch_x+1})")
-            plot_item.setLabel('bottom', f"Channel {ch_x+1}")
-            plot_item.setLabel('left', f"Channel {ch_y+1}")
-            plot_item.showGrid(x=True, y=True)
-            plot_item.setAspectLocked(True)
-            plot_item.enableAutoRange('xy', True)
-            data_plot = plot_item.plot(pen=pg.mkPen(colors[i % len(colors)], width=2))
-            self.plot_widgets.append(plot_widget)
-            self.plot_items.append(plot_item)
-            self.data_plots.append(data_plot)
-            cross_line = None
-            if self.cross_pair and (ch_x, ch_y) == self.cross_pair:
-                cross_line = pg.InfiniteLine(angle=45, movable=False, pen=pg.mkPen('r', width=2))
-                plot_item.addItem(cross_line)
-            self.cross_lines.append(cross_line)
+        # Orbit plot (single pair)
+        plot_widget = pg.PlotWidget()
+        plot_widget.setBackground('w')
+        plot_widget.setFixedSize(500, 500)
+        self.plot_layout.addWidget(plot_widget)
+        plot_item = plot_widget.getPlotItem()
+        plot_item.setTitle(f"Orbit Plot (Ch {ch_y+1} vs Ch {ch_x+1})")
+        plot_item.setLabel('bottom', f"Channel {ch_x+1}")
+        plot_item.setLabel('left', f"Channel {ch_y+1}")
+        plot_item.showGrid(x=True, y=True)
+        plot_item.setAspectLocked(True)
+        plot_item.enableAutoRange('xy', True)
+        data_plot = plot_item.plot(pen=pg.mkPen(colors[0], width=2))
+        self.plot_widgets.append(plot_widget)
+        self.plot_items.append(plot_item)
+        self.data_plots.append(data_plot)
+        cross_line = None
+        if self.cross_pair and (ch_x, ch_y) == self.cross_pair:
+            cross_line = pg.InfiniteLine(angle=45, movable=False, pen=pg.mkPen('r', width=2))
+            plot_item.addItem(cross_line)
+        self.cross_lines.append(cross_line)
 
         # Time-domain plots for selected channels
         for ch in sorted(channels_to_plot):
             time_plot_widget = pg.PlotWidget()
-            time_plot_widget.setBackground('w')  # Set white background
-            time_plot_widget.setFixedSize(500, 500)  # Increased size
+            time_plot_widget.setBackground('w')
+            time_plot_widget.setFixedSize(500, 500)
             self.plot_layout.addWidget(time_plot_widget)
             time_plot_item = time_plot_widget.getPlotItem()
             time_plot_item.setTitle(f"Channel {ch+1} Time Domain")
@@ -227,11 +207,13 @@ class OrbitFeature:
                 self.samples_per_channel, self.sample_rate, self.frequency, self.amplitude, self.offset, phases[i]
             )
 
-        # Update orbit plots
-        for i, (ch_x, ch_y) in enumerate(self.selected_pairs):
+        # Update orbit plot
+        if self.selected_pair:
+            ch_x, ch_y = self.selected_pair
             x_data = self.channel_data[ch_x]
             y_data = self.channel_data[ch_y]
-            self.data_plots[i].setData(x_data, y_data)
+            if self.data_plots:
+                self.data_plots[0].setData(x_data, y_data)
 
             # Verify circular orbit
             if (ch_x, ch_y) in [(0, 1), (2, 3)]:
@@ -246,7 +228,7 @@ class OrbitFeature:
                         self.console.append_to_console(f"Orbit (Ch {ch_x+1}, Ch {ch_y+1}) is not circular, std/mean: {std_radius/mean_radius:.4f}")
 
         # Update time-domain plots
-        channels_to_plot = set(ch for pair in self.selected_pairs for ch in pair)
+        channels_to_plot = set(self.selected_pair) if self.selected_pair else set()
         time = np.linspace(self.current_time - 1.0, self.current_time, self.samples_per_channel, endpoint=False)
         for i, ch in enumerate(sorted(channels_to_plot)):
             if i < len(self.time_plots):
@@ -278,10 +260,13 @@ class OrbitFeature:
             self.update_plots_with_sine_data()
             return
 
-        for i, (ch_x, ch_y) in enumerate(self.selected_pairs):
+        # Update orbit plot
+        if self.selected_pair:
+            ch_x, ch_y = self.selected_pair
             x_data = self.channel_data[ch_x]
             y_data = self.channel_data[ch_y]
-            self.data_plots[i].setData(x_data, y_data)
+            if self.data_plots:
+                self.data_plots[0].setData(x_data, y_data)
 
             if (ch_x, ch_y) in [(0, 1), (2, 3)]:
                 radius = np.sqrt((x_data - self.offset)**2 + (y_data - self.offset)**2)
@@ -294,11 +279,22 @@ class OrbitFeature:
                     if self.console:
                         self.console.append_to_console(f"Orbit (Ch {ch_x+1}, Ch {ch_y+1}) is not circular, std/mean: {std_radius/mean_radius:.4f}")
 
-        channels_to_plot = set(ch for pair in self.selected_pairs for ch in pair)
+        # Update time-domain plots
+        channels_to_plot = set(self.selected_pair) if self.selected_pair else set()
         time = np.linspace(self.current_time, self.current_time + 1.0, self.samples_per_channel, endpoint=False)
         for i, ch in enumerate(sorted(channels_to_plot)):
             if i < len(self.time_plots):
                 self.time_plots[i].setData(time, self.channel_data[ch])
+
+    def update_selected_channel(self, channel_name):
+        """Update the selected channel and refresh UI."""
+        self.selected_channel = channel_name
+        self.update_combo_options()
+        self.set_default_pair()
+        self.recreate_plots()
+        self.update_plots_with_sine_data()
+        if self.console:
+            self.console.append_to_console(f"Updated selected channel to: {self.selected_channel}")
 
     def get_widget(self):
         return self.widget
