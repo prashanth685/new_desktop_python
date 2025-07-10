@@ -1,6 +1,7 @@
 import numpy as np
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QLabel, QScrollArea
-from PyQt5.QtCore import QObject, QEvent, Qt
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QPushButton, QComboBox, QGridLayout
+from PyQt5.QtCore import QObject, QEvent, Qt, QTimer
+from PyQt5.QtGui import QIcon
 from pyqtgraph import PlotWidget, mkPen, AxisItem, InfiniteLine, SignalProxy
 from datetime import datetime
 import time
@@ -47,9 +48,8 @@ class TimeViewFeature:
         self.widget = None
         self.plot_widgets = []
         self.plots = []
-        self.data = []
-        self.channel_times = []
-        self.tacho_times = []
+        self.fifo_data = []  # FIFO buffers for each channel
+        self.fifo_times = []  # FIFO time buffers
         self.sample_rate = 4096
         self.num_channels = 4
         self.scaling_factor = 3.3 / 65535
@@ -61,43 +61,60 @@ class TimeViewFeature:
         self.trackers = []
         self.trigger_lines = []
         self.active_line_idx = None
+        self.window_seconds = 1  # Default window size in seconds
+        self.fifo_window_samples = self.sample_rate * self.window_seconds
+        self.settings_panel = None
+        self.settings_button = None
+        self.refresh_timer = None
+        self.needs_refresh = [True] * self.num_plots  # Flag for plot updates
         self.initUI()
         self.load_project_data()
-
-    def load_project_data(self):
-        """Load project data to determine number of channels."""
-        try:
-            project_data = self.db.get_project_data(self.project_name)
-            if project_data and "models" in project_data:
-                for model in project_data["models"]:
-                    if model.get("name") == self.model_name:
-                        available_channels = len(model.get("channels", []))
-                        self.num_channels = min(available_channels, 4)
-                        logging.debug(f"Loaded project data: {self.num_channels} channels for model {self.model_name}")
-                        return
-                logging.warning(f"No model data found for {self.model_name}")
-                if self.console:
-                    self.console.append_to_console(f"No model data for {self.model_name}")
-            else:
-                logging.warning(f"No valid project data found for {self.project_name}")
-                if self.console:
-                    self.console.append_to_console(f"No valid project data for {self.project_name}")
-        except Exception as e:
-            logging.error(f"Error loading project data: {str(e)}")
-            if self.console:
-                self.console.append_to_console(f"Error loading project data: {str(e)}")
+        self.initialize_buffers()
 
     def initUI(self):
-        """Initialize the UI with pyqtgraph subplots."""
+        """Initialize the UI with pyqtgraph subplots and settings panel."""
         self.widget = QWidget()
-        layout = QVBoxLayout()
-        
+        main_layout = QVBoxLayout()
+
+        # Settings and channel selection
+        top_layout = QHBoxLayout()
+        self.settings_button = QPushButton("Settings")
+        self.settings_button.setIcon(QIcon("settings_icon.png"))  # Replace with your image path
+        self.settings_button.clicked.connect(self.toggle_settings)
+        top_layout.addWidget(self.settings_button)
+        top_layout.addStretch()
+        main_layout.addLayout(top_layout)
+
+        # Settings panel
+        self.settings_panel = QWidget()
+        self.settings_panel.setVisible(False)
+        settings_layout = QGridLayout()
+        self.settings_panel.setLayout(settings_layout)
+
+        # Window Seconds
+        settings_layout.addWidget(QLabel("Window Size (seconds)"), 0, 0)
+        window_combo = QComboBox()
+        window_combo.addItems([str(i) for i in range(1, 11)])
+        window_combo.setCurrentText(str(self.window_seconds))
+        settings_layout.addWidget(window_combo, 0, 1)
+        self.settings_widgets = {"WindowSeconds": window_combo}
+
+        # Save and Close buttons
+        save_button = QPushButton("Save")
+        save_button.clicked.connect(self.save_settings)
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(self.close_settings)
+        settings_layout.addWidget(save_button, 1, 0)
+        settings_layout.addWidget(close_button, 1, 1)
+
+        main_layout.addWidget(self.settings_panel)
+
         # Create a scroll area to contain the plots
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         scroll_content = QWidget()
         scroll_layout = QVBoxLayout(scroll_content)
-    
+
         colors = ['r', 'g', 'b', 'y', 'c', 'm']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
@@ -116,7 +133,8 @@ class TimeViewFeature:
             plot = plot_widget.plot([], [], pen=pen)
             self.plots.append(plot)
             self.plot_widgets.append(plot_widget)
-            self.data.append([])
+            self.fifo_data.append([])
+            self.fifo_times.append([])
 
             vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
             vline.setVisible(False)
@@ -138,13 +156,90 @@ class TimeViewFeature:
             scroll_layout.addWidget(plot_widget)
 
         scroll_area.setWidget(scroll_content)
-        layout.addWidget(scroll_area)
-        self.widget.setLayout(layout)
+        main_layout.addWidget(scroll_area)
+        self.widget.setLayout(main_layout)
+
+        # Initialize refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_plots)
+        self.refresh_timer.start(100)  # Refresh every 100ms
 
         if not self.model_name and self.console:
             self.console.append_to_console("No model selected in TimeViewFeature.")
         if not self.channel and self.console:
             self.console.append_to_console("No channel selected in TimeViewFeature.")
+
+    def initialize_buffers(self):
+        """Initialize FIFO buffers for each channel."""
+        self.fifo_window_samples = self.sample_rate * self.window_seconds
+        for i in range(self.num_plots):
+            self.fifo_data[i] = np.zeros(self.fifo_window_samples)
+            time_step = self.window_seconds / self.fifo_window_samples
+            self.fifo_times[i] = np.array([i * time_step for i in range(self.fifo_window_samples)])
+        logging.debug(f"Initialized FIFO buffers: {self.num_plots} channels, {self.fifo_window_samples} samples each")
+
+    def load_project_data(self):
+        """Load project data to determine number of channels."""
+        try:
+            project_data = self.db.get_project_data(self.project_name)
+            if project_data and "models" in project_data:
+                for model in project_data["models"]:
+                    if model.get("name") == self.model_name:
+                        available_channels = len(model.get("channels", []))
+                        self.num_channels = min(available_channels, 4)
+                        logging.debug(f"Loaded project data: {self.num_channels} channels for model {self.model_name}")
+                        if self.console:
+                            self.console.append_to_console(f"Loaded {self.num_channels} channels for model {self.model_name}")
+                        return
+                self.log_and_set_status(f"No model data found for {self.model_name}")
+            else:
+                self.log_and_set_status(f"No valid project data found for {self.project_name}")
+        except Exception as e:
+            self.log_and_set_status(f"Error loading project data: {str(e)}")
+
+    def toggle_settings(self):
+        """Toggle visibility of the settings panel."""
+        self.settings_panel.setVisible(not self.settings_panel.isVisible())
+        self.settings_button.setVisible(not self.settings_panel.isVisible())
+
+    def save_settings(self):
+        """Save settings from the panel and update buffers."""
+        try:
+            selected_seconds = int(self.settings_widgets["WindowSeconds"].currentText())
+            if 1 <= selected_seconds <= 10:
+                if selected_seconds != self.window_seconds:
+                    self.window_seconds = selected_seconds
+                    self.update_window_size()
+                    if self.console:
+                        self.console.append_to_console(f"Applied window size: {self.window_seconds} seconds.")
+                self.settings_panel.setVisible(False)
+                self.settings_button.setVisible(True)
+            else:
+                self.log_and_set_status(f"Invalid window seconds selected: {selected_seconds}. Must be 1-10.")
+        except Exception as e:
+            self.log_and_set_status(f"Error saving TimeView settings: {str(e)}")
+
+    def close_settings(self):
+        """Close the settings panel without saving."""
+        self.settings_widgets["WindowSeconds"].setCurrentText(str(self.window_seconds))
+        self.settings_panel.setVisible(False)
+        self.settings_button.setVisible(True)
+
+    def update_window_size(self):
+        """Update FIFO buffer sizes when window_seconds changes."""
+        new_fifo_window_samples = self.sample_rate * self.window_seconds
+        for i in range(self.num_plots):
+            current_data = self.fifo_data[i]
+            current_length = len(current_data)
+            new_data = np.zeros(new_fifo_window_samples)
+            copy_length = min(current_length, new_fifo_window_samples)
+            new_data[:copy_length] = current_data[:copy_length]
+            self.fifo_data[i] = new_data
+            time_step = self.window_seconds / new_fifo_window_samples
+            self.fifo_times[i] = np.array([j * time_step for j in range(new_fifo_window_samples)])
+            self.needs_refresh[i] = True
+        self.fifo_window_samples = new_fifo_window_samples
+        logging.debug(f"Updated FIFO buffers to {self.window_seconds} seconds, {self.fifo_window_samples} samples")
 
     def get_widget(self):
         """Return the widget containing the plots."""
@@ -171,18 +266,14 @@ class TimeViewFeature:
                 self.console.append_to_console(f"Refreshed filenames: {len(filenames)} found, counter set to {self.filename_counter}")
             return filenames
         except Exception as e:
-            logging.error(f"Error refreshing filenames: {str(e)}")
-            if self.console:
-                self.console.append_to_console(f"Error refreshing filenames: {str(e)}")
+            self.log_and_set_status(f"Error refreshing filenames: {str(e)}")
             self.filename_counter = 1
             return []
 
     def start_saving(self):
         """Start saving data to the database."""
         if not self.parent.current_project or not self.model_name:
-            logging.error("Cannot start saving: No project or model selected")
-            if self.console:
-                self.console.append_to_console("Cannot start saving: No project or model selected")
+            self.log_and_set_status("Cannot start saving: No project or model selected")
             return
         
         self.refresh_filenames()
@@ -205,9 +296,9 @@ class TimeViewFeature:
             self.parent.sub_tool_bar.refresh_filenames()
         except AttributeError:
             logging.warning("No sub_tool_bar found to refresh filenames")
-            
+
     def on_data_received(self, tag_name, model_name, values, sample_rate):
-        """Handle incoming MQTT data, update plots, and save to database if saving is enabled."""
+        """Handle incoming MQTT data, update FIFO buffers, and save if enabled."""
         logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "
                     f"values_len={len(values) if values else 0}, sample_rate={sample_rate}")
         if self.model_name != model_name:
@@ -215,9 +306,7 @@ class TimeViewFeature:
             return
         try:
             if not values or len(values) != 6:
-                logging.warning(f"Received incorrect number of sublists: {len(values)}, expected 6")
-                if self.console:
-                    self.console.append_to_console(f"Received incorrect number of sublists: {len(values)}")
+                self.log_and_set_status(f"Received incorrect number of sublists: {len(values) if values else 0}, expected 6")
                 return
 
             self.sample_rate = sample_rate
@@ -226,69 +315,40 @@ class TimeViewFeature:
 
             for ch in range(self.num_channels):
                 if len(values[ch]) != self.channel_samples:
-                    logging.warning(f"Channel {ch+1} has {len(values[ch])} samples, expected {self.channel_samples}")
-                    if self.console:
-                        self.console.append_to_console(f"Channel {ch+1} sample mismatch: {len(values[ch])}")
+                    self.log_and_set_status(f"Channel {ch+1} has {len(values[ch])} samples, expected {self.channel_samples}")
                     return
 
             tacho_freq_samples = len(values[4])
             tacho_trigger_samples = len(values[5])
             if tacho_freq_samples != self.tacho_samples or tacho_trigger_samples != self.tacho_samples:
-                logging.warning(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}, expected={self.tacho_samples}")
-                if self.console:
-                    self.console.append_to_console(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}")
+                self.log_and_set_status(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}, expected={self.tacho_samples}")
                 return
 
+            # Update FIFO buffers
             current_time = time.time()
-            channel_time_step = 1.0 / sample_rate
-            tacho_time_step = 1.0 / sample_rate
-            self.channel_times = np.array([current_time - (self.channel_samples - 1) * channel_time_step + i * channel_time_step for i in range(self.channel_samples)])
-            self.tacho_times = np.array([current_time - (self.tacho_samples - 1) * tacho_time_step + i * tacho_time_step for i in range(self.tacho_samples)])
+            time_step = 1.0 / sample_rate
+            new_times = np.array([current_time - (self.channel_samples - 1 - i) * time_step for i in range(self.channel_samples)])
 
+            # Shift and append data
             for ch in range(self.num_channels):
-                self.data[ch] = np.array(values[ch][:self.channel_samples]) * self.scaling_factor
-                logging.debug(f"Channel {ch+1} data: {len(self.data[ch])} samples, scaled with factor {self.scaling_factor}")
+                new_data = np.array(values[ch]) * self.scaling_factor
+                self.fifo_data[ch] = np.roll(self.fifo_data[ch], -self.channel_samples)
+                self.fifo_data[ch][-self.channel_samples:] = new_data
+                self.needs_refresh[ch] = True
 
-            self.data[self.num_channels] = np.array(values[4][:self.tacho_samples]) / 100
-            self.data[self.num_channels + 1] = np.array(values[5][:self.tacho_samples])
-            logging.debug(f"Tacho freq data: {len(self.data[self.num_channels])} samples")
-            logging.debug(f"Tacho trigger data: {len(self.data[self.num_channels + 1])} samples, first 10: {self.data[self.num_channels + 1][:10]}")
+            self.fifo_data[self.num_channels] = np.roll(self.fifo_data[self.num_channels], -self.tacho_samples)
+            self.fifo_data[self.num_channels][-self.tacho_samples:] = np.array(values[4]) / 100
+            self.needs_refresh[self.num_channels] = True
 
+            self.fifo_data[self.num_channels + 1] = np.roll(self.fifo_data[self.num_channels + 1], -self.tacho_samples)
+            self.fifo_data[self.num_channels + 1][-self.tacho_samples:] = np.array(values[5])
+            self.needs_refresh[self.num_channels + 1] = True
+
+            # Update time buffer
             for ch in range(self.num_plots):
-                times = self.tacho_times if ch >= self.num_channels else self.channel_times
-                if ch < len(self.data) and len(self.data[ch]) > 0 and len(times) > 0:
-                    self.plots[ch].setData(times, self.data[ch])
-                    self.plot_widgets[ch].setXRange(times[0], times[-1], padding=0)
-                    if ch < self.num_channels:
-                        self.plot_widgets[ch].enableAutoRange(axis='y')
-                    elif ch == self.num_channels:
-                        self.plot_widgets[ch].enableAutoRange(axis='y')
-                    else:
-                        self.plot_widgets[ch].setYRange(0, 1.0, padding=0)
-                else:
-                    logging.warning(f"No data for plot {ch}, data_len={len(self.data[ch])}, times_len={len(times)}")
-                    if self.console:
-                        self.console.append_to_console(f"No data for plot {ch}")
-
-            if len(self.data[self.num_channels + 1]) > 0:
-                if self.trigger_lines:
-                    for line in self.trigger_lines:
-                        if line:
-                            self.plot_widgets[self.num_plots - 1].removeItem(line)
-                self.trigger_lines = []
-
-                trigger_indices = np.where(self.data[self.num_plots - 1] == 1)[0]
-                logging.debug(f"Tacho trigger indices (value=1): {len(trigger_indices)} points")
-                for idx in trigger_indices:
-                    if idx < len(self.tacho_times):
-                        line = InfiniteLine(
-                            pos=self.tacho_times[idx],
-                            angle=90,
-                            movable=False,
-                            pen=mkPen('k', width=2, style=Qt.SolidLine)
-                        )
-                        self.plot_widgets[self.num_plots - 1].addItem(line)
-                        self.trigger_lines.append(line)
+                self.fifo_times[ch] = np.roll(self.fifo_times[ch], -self.channel_samples)
+                base_time = self.fifo_times[ch][-self.channel_samples - 1] if len(self.fifo_times[ch]) > self.channel_samples else 0
+                self.fifo_times[ch][-self.channel_samples:] = base_time + np.array([(i + 1) * time_step for i in range(self.channel_samples)])
 
             if self.is_saving:
                 try:
@@ -297,9 +357,9 @@ class TimeViewFeature:
                         "filename": self.current_filename,
                         "frameIndex": 0,
                         "message": {
-                            "channel_data": [list(self.data[i]) for i in range(self.num_channels)],
-                            "tacho_freq": list(self.data[self.num_channels]),
-                            "tacho_trigger": list(self.data[self.num_channels + 1])
+                            "channel_data": [list(values[i]) for i in range(self.num_channels)],
+                            "tacho_freq": list(values[self.num_channels]),
+                            "tacho_trigger": list(values[self.num_channels + 1])
                         },
                         "numberOfChannels": self.num_channels,
                         "samplingRate": self.sample_rate,
@@ -313,23 +373,64 @@ class TimeViewFeature:
                         if self.console:
                             self.console.append_to_console(f"Saved data to {self.current_filename}")
                     else:
-                        logging.error(f"Failed to save data: {msg}")
-                        if self.console:
-                            self.console.append_to_console(f"Failed to save data: {msg}")
+                        self.log_and_set_status(f"Failed to save data: {msg}")
                 except Exception as e:
-                    logging.error(f"Error saving data to database: {str(e)}")
-                    if self.console:
-                        self.console.append_to_console(f"Error saving data: {str(e)}")
+                    self.log_and_set_status(f"Error saving data to database: {str(e)}")
 
-            logging.debug(f"Updated {self.num_plots} plots: {self.channel_samples} channel samples, {self.tacho_samples} tacho samples")
-            if self.console:
-                self.console.append_to_console(
-                    f"Time View ({self.model_name}): Updated {self.num_plots} plots with {self.channel_samples} channel samples, {self.tacho_samples} tacho samples"
-                )
+            logging.debug(f"Updated FIFO buffers: {self.channel_samples} new samples, window={self.window_seconds}s")
         except Exception as e:
-            logging.error(f"Error updating plots: {str(e)}")
-            if self.console:
-                self.console.append_to_console(f"Error updating plots: {str(e)}")
+            self.log_and_set_status(f"Error processing MQTT data: {str(e)}")
+
+    def refresh_plots(self):
+        """Refresh plots if needed."""
+        try:
+            for ch in range(self.num_plots):
+                if self.needs_refresh[ch]:
+                    times = self.fifo_times[ch]
+                    data = self.fifo_data[ch]
+                    if len(data) > 0 and len(times) > 0:
+                        self.plots[ch].setData(times, data)
+                        self.plot_widgets[ch].setXRange(times[-self.fifo_window_samples], times[-1], padding=0)
+                        if ch < self.num_channels:
+                            self.plot_widgets[ch].enableAutoRange(axis='y')
+                        elif ch == self.num_channels:
+                            self.plot_widgets[ch].enableAutoRange(axis='y')
+                        else:
+                            self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
+                    else:
+                        self.log_and_set_status(f"No data for plot {ch}, data_len={len(data)}, times_len={len(times)}")
+
+                    # Update trigger lines for tacho trigger channel
+                    if ch == self.num_plots - 1:
+                        if self.trigger_lines:
+                            for line in self.trigger_lines:
+                                if line:
+                                    self.plot_widgets[ch].removeItem(line)
+                            self.trigger_lines = []
+
+                        trigger_indices = np.where(self.fifo_data[ch][-self.fifo_window_samples:] == 1)[0]
+                        logging.debug(f"Tacho trigger indices (value=1): {len(trigger_indices)} points")
+                        for idx in trigger_indices:
+                            if idx < len(times):
+                                line = InfiniteLine(
+                                    pos=times[idx],
+                                    angle=90,
+                                    movable=False,
+                                    pen=mkPen('k', width=2, style=Qt.SolidLine)
+                                )
+                                self.plot_widgets[ch].addItem(line)
+                                self.trigger_lines.append(line)
+
+                    self.needs_refresh[ch] = False
+
+            if any(self.needs_refresh):
+                logging.debug(f"Refreshed plots: {self.fifo_window_samples} samples, window={self.window_seconds}s")
+                if self.console:
+                    self.console.append_to_console(
+                        f"Time View ({self.model_name}): Refreshed {self.num_plots} plots with {self.fifo_window_samples} samples, window={self.window_seconds}s"
+                    )
+        except Exception as e:
+            self.log_and_set_status(f"Error refreshing plots: {str(e)}")
 
     def mouse_enter(self, idx):
         """Called when mouse enters plot idx viewport."""
@@ -356,7 +457,7 @@ class TimeViewFeature:
         mouse_point = self.plot_widgets[idx].plotItem.vb.mapSceneToView(pos)
         x = mouse_point.x()
 
-        times = self.tacho_times if idx >= self.num_channels else self.channel_times
+        times = self.fifo_times[idx]
         if len(times) > 0:
             if x < times[0]:
                 x = times[0]
@@ -366,3 +467,14 @@ class TimeViewFeature:
         for vline in self.vlines:
             vline.setPos(x)
             vline.setVisible(True)
+
+    def log_and_set_status(self, message):
+        """Log a message and append to console if available."""
+        logging.error(message)
+        if self.console:
+            self.console.append_to_console(message)
+
+    def close(self):
+        """Clean up resources."""
+        if self.refresh_timer:
+            self.refresh_timer.stop()

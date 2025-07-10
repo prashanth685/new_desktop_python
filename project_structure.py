@@ -152,31 +152,42 @@ class ProjectStructureWidget(QWidget):
             if not isinstance(project_data, dict):
                 raise TypeError(f"Expected dict, got {type(project_data)}")
             self.project_cache[project_name] = project_data
-            models = project_data.get("models", {})
+            models = project_data.get("models", [])
             if not models:
                 self.tree_view.addTopLevelItem(QTreeWidgetItem(["No models available"]))
+                logging.info(f"No models found for project '{project_name}'")
                 return
             self.tree_view.setIndentation(30)
-
             self.tree_view.clear()
-            for model_name, model_data in models.items():
-                if not isinstance(model_data, dict):
-                    logging.warning(f"Invalid model data for '{model_name}'")
+
+            for model in models:
+                if not isinstance(model, dict):
+                    logging.warning(f"Invalid model data in '{project_name}': {model}")
                     continue
 
-                model_display_name = model_data.get("name", model_name) or "Unnamed Model"
-                model_item = QTreeWidgetItem([f"📁 {model_display_name}"])
+                model_name = model.get("name", "Unnamed Model")
+                model_item = QTreeWidgetItem([f"📁 {model_name}"])
+                # Store model data for later use
+                model_item.setData(0, Qt.UserRole, {"model_name": model_name, "channels": model.get("channels", []), "tagName": model.get("tagName", "")})
                 self.tree_view.addTopLevelItem(model_item)
 
-                channels = model_data.get("channels", [])
+                channels = model.get("channels", [])
                 for channel in channels:
                     if not isinstance(channel, dict):
+                        logging.warning(f"Invalid channel data in '{model_name}': {channel}")
                         continue
-                    channel_name = channel.get("channelName", channel.get("channel_name", "Unnamed Channel"))
-                    QTreeWidgetItem(model_item, [f"📄 {channel_name}"])
+                    channel_name = channel.get("channelName", "Unnamed Channel")
+                    channel_item = QTreeWidgetItem(model_item, [f"📄 {channel_name}"])
+                    channel_item.setData(0, Qt.UserRole, {"channel_name": channel_name})
+
+                tag_name = model.get("tagName", "")
+                if tag_name:
+                    tag_item = QTreeWidgetItem(model_item, [f"🏷️ {tag_name}"])
+                    tag_item.setData(0, Qt.UserRole, {"tag_name": tag_name})
 
                 self.tree_view.expandItem(model_item)
 
+            logging.debug(f"Populated tree view for '{project_name}' with {len(models)} models")
         except Exception as e:
             logging.error(f"Failed to populate tree for '{project_name}': {str(e)}")
             self.parent.console.append_to_console(f"Failed to load project structure: {str(e)}")
@@ -184,21 +195,25 @@ class ProjectStructureWidget(QWidget):
             self.tree_view.blockSignals(False)
 
     def on_structure_item_expanded(self, item):
-        if not item.data(0, Qt.UserRole).get("loaded", False):
-            channels = item.data(0, Qt.UserRole).get("channels", [])
-            for channel in channels:
-                if not isinstance(channel, dict):
-                    continue
-                channel_name = channel.get("channelName", channel.get("channel_name", "Unnamed Channel"))
-                QTreeWidgetItem(item, [f"📄 {channel_name}"])
-            item.setData(0, Qt.UserRole, {**item.data(0, Qt.UserRole), "loaded": True})
+        model_data = item.data(0, Qt.UserRole)
+        if not model_data or not isinstance(model_data, dict):
+            return
+        if model_data.get("loaded", False):
+            return
+        # Channels are already populated in populate_tree_view, so mark as loaded
+        item.setData(0, Qt.UserRole, {**model_data, "loaded": True})
 
     def on_structure_item_clicked(self, item, column):
-        model_data = item.data(0, Qt.UserRole)
+        item_data = item.data(0, Qt.UserRole)
         item_text = item.text(0)
         logging.debug(f"Tree view item clicked: {item_text}")
-        if model_data and isinstance(model_data, dict) and "channels" in model_data:
-            self.parent.console.append_to_console(f"Selected model: {item_text}")
+        if item_data and isinstance(item_data, dict):
+            if "model_name" in item_data:
+                self.parent.console.append_to_console(f"Selected model: {item_text}")
+            elif "channel_name" in item_data:
+                self.parent.console.append_to_console(f"Selected channel: {item_text}")
+            elif "tag_name" in item_data:
+                self.parent.console.append_to_console(f"Selected tag: {item_text}")
 
     def open_project(self):
         if not self.selected_project:
