@@ -1,4 +1,4 @@
-from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea, QComboBox, QApplication
+from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea, QComboBox, QApplication, QTableWidget, QTableWidgetItem
 from PyQt5.QtCore import Qt
 import sys
 import datetime
@@ -65,23 +65,6 @@ class CreateProjectWidget(QWidget):
             QScrollArea {
                 border: none;
                 background-color: transparent;
-            }
-            QScrollBar:vertical {
-                border: none;
-                background: #e0e4e8;
-                width: 8px;
-                margin: 0px;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical {
-                background: #a0a8b2;
-                border-radius: 4px;
-            }
-            QScrollBar::handle:vertical:hover {
-                background: #7a8290;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
-                height: 0px;
             }
         """)
         main_layout.addWidget(scroll_area)
@@ -178,6 +161,7 @@ class CreateProjectWidget(QWidget):
                 border-color: #93c5fd;
             }
         """)
+        self.channel_count_combo.currentTextChanged.connect(self.update_table)
         project_form.addRow("Channel Count:", self.channel_count_combo)
         card_layout.addLayout(project_form)
 
@@ -256,6 +240,72 @@ class CreateProjectWidget(QWidget):
 
         card_layout.addLayout(button_layout)
 
+    def update_table(self, channel_count):
+        for widget, model_name_input, tag_name_input, channel_inputs, _ in self.model_inputs:
+            for table, num_channels in channel_inputs:
+                model_layout = widget.layout()
+                model_layout.removeWidget(table)
+                table.deleteLater()
+
+            num_channels = {"DAQ4CH": 4, "DAQ8CH": 8, "DAQ10CH": 10}.get(channel_count, 4)
+            table = QTableWidget(num_channels, 11)
+            table.setHorizontalHeaderLabels(["S.No.", "Channel Name", "Channel Type", "Sensitivity", "Unit", "Correction Factor", "Gain", "Unit Type", "Angle", "Direction", "Shaft"])
+            table.setStyleSheet("""
+                QTableWidget {
+                    border: 1px solid #e5e7eb;
+                    border-radius: 8px;
+                    background-color: #ffffff;
+                    padding: 10px;
+                }
+                QTableWidget::item {
+                    padding: 15px;
+                    border-bottom: 1px solid #f1f5f9;
+                    color: #2d3748;
+                }
+                QTableWidget::item:selected {
+                    background-color: #edf2f7;
+                    color: #2d3748;
+                }
+                QHeaderView::section {
+                    background-color: #4a5568;
+                    color: white;
+                    padding: 15px;
+                    font-weight: 600;
+                    border: none;
+                    border-bottom: 2px solid #2d3748;
+                    min-height: 40px;
+                }
+                QHeaderView::section:horizontal {
+                    text-align: left;
+                }
+            """)
+            table.horizontalHeader().setStretchLastSection(True)
+            table.horizontalHeader().setMinimumHeight(40)
+            table.verticalHeader().setVisible(False)
+            table.setAlternatingRowColors(True)
+            table.setEditTriggers(QTableWidget.AllEditTriggers)
+            table.setMinimumHeight(table.rowHeight(0) * num_channels + table.horizontalHeader().height() + 20)
+            table.setMaximumHeight(table.rowHeight(0) * num_channels + table.horizontalHeader().height() + 20)
+            table.resizeColumnsToContents()
+
+            for row in range(num_channels):
+                item = QTableWidgetItem(str(row + 1))
+                item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 0, item)
+                table.setItem(row, 1, QTableWidgetItem(""))
+                table.setItem(row, 2, QTableWidgetItem("Displacement"))
+                table.setItem(row, 3, QTableWidgetItem(""))
+                table.setItem(row, 4, QTableWidgetItem(""))
+                table.setItem(row, 5, QTableWidgetItem(""))
+                table.setItem(row, 6, QTableWidgetItem(""))
+                table.setItem(row, 7, QTableWidgetItem(""))
+                table.setItem(row, 8, QTableWidgetItem(""))
+                table.setItem(row, 9, QTableWidgetItem("Right"))
+                table.setItem(row, 10, QTableWidgetItem(""))
+
+            model_layout.addWidget(table)
+            channel_inputs[0] = (table, num_channels)
+
     def add_model_input(self):
         channel_count = self.channel_count_combo.currentText()
         num_channels = {"DAQ4CH": 4, "DAQ8CH": 8, "DAQ10CH": 10}.get(channel_count, 4)
@@ -312,7 +362,7 @@ class CreateProjectWidget(QWidget):
             QLineEdit {
                 border: 1px solid #d1d5db;
                 border-radius: 4px;
-                padding:8px;
+                padding: 8px;
                 font-size: 14px;
                 min-width: 400px;
                 background-color: #ffffff;
@@ -359,301 +409,85 @@ class CreateProjectWidget(QWidget):
         """)
         model_layout.addWidget(channels_label)
 
-        channel_container = QWidget()
-        channel_layout = QVBoxLayout()
-        channel_layout.setSpacing(12)
-        channel_container.setLayout(channel_layout)
-        model_layout.addWidget(channel_container)
-
-        channel_inputs = []
-
-        def add_channel_input():
-            channel_widget = QWidget()
-            channel_form = QFormLayout()
-            channel_form.setSpacing(12)
-            channel_form.setLabelAlignment(Qt.AlignLeft)
-            channel_form.setFormAlignment(Qt.AlignCenter)
-            channel_widget.setLayout(channel_form)
-
-            channel_name_input = QLineEdit()
-            channel_name_input.setPlaceholderText("Channel name")
-            channel_name_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Channel Name:", channel_name_input)
-
-            type_combo = QComboBox()
-            type_combo.addItems(self.available_types)
-            type_combo.setStyleSheet("""
-                QComboBox {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QComboBox:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QComboBox:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Type:", type_combo)
-
-            sensitivity_input = QLineEdit()
-            sensitivity_input.setPlaceholderText("Sensitivity")
-            sensitivity_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Sensitivity:", sensitivity_input)
-
-            unit_input = QLineEdit()
-            unit_input.setPlaceholderText("Unit")
-            unit_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Unit:", unit_input)
-
-            correction_value_input = QLineEdit()
-            correction_value_input.setPlaceholderText("Correction Value")
-            correction_value_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Correction Value:", correction_value_input)
-
-            gain_input = QLineEdit()
-            gain_input.setPlaceholderText("Gain")
-            gain_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Gain:", gain_input)
-
-            unit_type_input = QLineEdit()
-            unit_type_input.setPlaceholderText("Unit Type")
-            unit_type_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Unit Type:", unit_type_input)
-
-            angle_input = QLineEdit()
-            angle_input.setPlaceholderText("Angle")
-            angle_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Angle:", angle_input)
-
-            angle_direction_combo = QComboBox()
-            angle_direction_combo.addItems(self.available_directions)
-            angle_direction_combo.setStyleSheet("""
-                QComboBox {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QComboBox:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QComboBox:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Angle Direction:", angle_direction_combo)
-
-            shaft_input = QLineEdit()
-            shaft_input.setPlaceholderText("Shaft")
-            shaft_input.setStyleSheet("""
-                QLineEdit {
-                    border: 1px solid #d1d5db;
-                    border-radius: 4px;
-                    padding: 8px;
-                    font-size: 14px;
-                    min-width: 400px;
-                    background-color: #ffffff;
-                }
-                QLineEdit:focus {
-                    border-color: #3b82f6;
-                    outline: none;
-                }
-                QLineEdit:hover {
-                    border-color: #93c5fd;
-                }
-            """)
-            channel_form.addRow("Shaft:", shaft_input)
-
-            remove_channel_button = QPushButton("- Remove")
-            remove_channel_button.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    color: #ef4444;
-                    border: none;
-                    font-size: 14px;
-                    font-weight: 500;
-                }
-                QPushButton:hover {
-                    color: #dc2626;
-                }
-                QPushButton:pressed {
-                    color: #b91c1c;
-                }
-            """)
-            remove_channel_button.clicked.connect(lambda: remove_channel(channel_widget))
-            channel_form.addRow("", remove_channel_button)
-
-            channel_inputs.append((
-                channel_widget,
-                channel_name_input,
-                type_combo,
-                sensitivity_input,
-                unit_input,
-                correction_value_input,
-                gain_input,
-                unit_type_input,
-                angle_input,
-                angle_direction_combo,
-                shaft_input
-            ))
-            channel_layout.addWidget(channel_widget)
-            channel_container.adjustSize()
-
-        def remove_channel(channel_widget):
-            if len(channel_inputs) > 1:
-                for inputs in channel_inputs:
-                    if inputs[0] == channel_widget:
-                        channel_inputs.remove(inputs)
-                        channel_layout.removeWidget(channel_widget)
-                        channel_widget.deleteLater()
-                        channel_container.adjustSize()
-                        break
-
-        for _ in range(num_channels):
-            add_channel_input()
-
-        add_channel_button = QPushButton("+ Add Channel")
-        add_channel_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: #3b82f6;
+        table = QTableWidget(num_channels, 11)
+        table.setHorizontalHeaderLabels(["S.No.", "Channel Name", "Channel Type", "Sensitivity", "Unit", "Correction Factor", "Gain", "Unit Type", "Angle", "Direction", "Shaft"])
+        table.setStyleSheet("""
+            QTableWidget {
+                border: 1px solid #e5e7eb;
+                border-radius: 8px;
+                background-color: #ffffff;
+                padding: 10px;
+            }
+            QTableWidget::item {
+                padding: 10px 10px;
+                border-bottom: 1px solid #f1f5f9;
+                color: #2d3748;
+            }
+            QTableWidget::item:selected {
+                background-color: #edf2f7;
+                color: #2d3748;
+            }
+            QHeaderView::section {
+                background-color: #4a5568;
+                color: white;
+                padding: 15px;
+                font-weight: 600;
                 border: none;
-                font-size: 14px;
-                font-weight: 500;
+                border-bottom: 2px solid #2d3748;
+                min-height: 60px;
             }
-            QPushButton:hover {
-                color: #2563eb;
-            }
-            QPushButton:pressed {
-                color: #1d4ed8;
+            QHeaderView::section:horizontal {
+                text-align: left;
             }
         """)
-        add_channel_button.clicked.connect(add_channel_input)
-        model_layout.addWidget(add_channel_button)
+        table.horizontalHeader().setStretchLastSection(True)
+        table.horizontalHeader().setMinimumHeight(60)
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setEditTriggers(QTableWidget.AllEditTriggers)
+        table.setMinimumHeight(table.rowHeight(0) * num_channels + table.horizontalHeader().height() + 20)
+        table.setMaximumHeight(table.rowHeight(0) * num_channels + table.horizontalHeader().height() + 20)
+        table.resizeColumnsToContents()
 
-        self.model_inputs.append((model_widget, model_name_input, tag_name_input, channel_inputs, channel_count))
+        for row in range(num_channels):
+            item = QTableWidgetItem(str(row + 1))
+            item.setTextAlignment(Qt.AlignCenter)
+            table.setItem(row, 0, item)
+            table.setItem(row, 1, QTableWidgetItem(""))
+            table.setItem(row, 2, QTableWidgetItem("Displacement"))
+            table.setItem(row, 3, QTableWidgetItem(""))
+            table.setItem(row, 4, QTableWidgetItem(""))
+            table.setItem(row, 5, QTableWidgetItem(""))
+            table.setItem(row, 6, QTableWidgetItem(""))
+            table.setItem(row, 7, QTableWidgetItem(""))
+            table.setItem(row, 8, QTableWidgetItem(""))
+            table.setItem(row, 9, QTableWidgetItem("Right"))
+            table.setItem(row, 10, QTableWidgetItem(""))
+
+        model_layout.addWidget(table)
+
+        self.model_inputs.append((model_widget, model_name_input, tag_name_input, [(table, num_channels)], channel_count))
         self.model_layout.addWidget(model_widget)
+
+    def add_channel_to_table(self, table):
+        current_rows = table.rowCount()
+        table.setRowCount(current_rows + 1)
+        item = QTableWidgetItem(str(current_rows + 1))
+        item.setTextAlignment(Qt.AlignCenter)
+        table.setItem(current_rows, 0, item)
+        table.setItem(current_rows, 1, QTableWidgetItem(""))
+        table.setItem(current_rows, 2, QTableWidgetItem("Displacement"))
+        table.setItem(current_rows, 3, QTableWidgetItem(""))
+        table.setItem(current_rows, 4, QTableWidgetItem(""))
+        table.setItem(current_rows, 5, QTableWidgetItem(""))
+        table.setItem(current_rows, 6, QTableWidgetItem(""))
+        table.setItem(current_rows, 7, QTableWidgetItem(""))
+        table.setItem(current_rows, 8, QTableWidgetItem(""))
+        table.setItem(current_rows, 9, QTableWidgetItem("Right"))
+        table.setItem(current_rows, 10, QTableWidgetItem(""))
+        table.setMinimumHeight(table.rowHeight(0) * (current_rows + 1) + table.horizontalHeader().height() + 20)
+        table.setMaximumHeight(table.rowHeight(0) * (current_rows + 1) + table.horizontalHeader().height() + 20)
+        table.resizeColumnsToContents()
 
     def remove_model_input(self, model_widget):
         if len(self.model_inputs) > 1:
@@ -690,23 +524,24 @@ class CreateProjectWidget(QWidget):
                 return
 
             channels = []
-            for _, channel_name_input, type_combo, sensitivity_input, unit_input, correction_value_input, gain_input, unit_type_input, angle_input, angle_direction_combo, shaft_input in channel_inputs:
-                channel_name = channel_name_input.text().strip()
-                if not channel_name:
-                    QMessageBox.warning(self, "Error", f"Channel name cannot be empty for model '{model_name}'!")
-                    return
-                channels.append({
-                    "channelName": channel_name,
-                    "type": type_combo.currentText(),
-                    "sensitivity": sensitivity_input.text().strip(),
-                    "unit": unit_input.text().strip(),
-                    "correctionValue": correction_value_input.text().strip(),
-                    "gain": gain_input.text().strip(),
-                    "unitType": unit_type_input.text().strip(),
-                    "angle": angle_input.text().strip(),
-                    "angleDirection": angle_direction_combo.currentText(),
-                    "shaft": shaft_input.text().strip()
-                })
+            for table, num_channels in channel_inputs:
+                for row in range(table.rowCount()):
+                    channel_name = table.item(row, 1).text().strip() if table.item(row, 1) else ""
+                    if not channel_name:
+                        QMessageBox.warning(self, "Error", f"Channel name cannot be empty for model '{model_name}'!")
+                        return
+                    channels.append({
+                        "channelName": channel_name,
+                        "type": table.item(row, 2).text().strip() if table.item(row, 2) else "Displacement",
+                        "sensitivity": table.item(row, 3).text().strip() if table.item(row, 3) else "",
+                        "unit": table.item(row, 4).text().strip() if table.item(row, 4) else "",
+                        "correctionValue": table.item(row, 5).text().strip() if table.item(row, 5) else "",
+                        "gain": table.item(row, 6).text().strip() if table.item(row, 6) else "",
+                        "unitType": table.item(row, 7).text().strip() if table.item(row, 7) else "",
+                        "angle": table.item(row, 8).text().strip() if table.item(row, 8) else "",
+                        "angleDirection": table.item(row, 9).text().strip() if table.item(row, 9) else "Right",
+                        "shaft": table.item(row, 10).text().strip() if table.item(row, 10) else ""
+                    })
 
             if not channels:
                 QMessageBox.warning(self, "Error", f"At least one channel is required for model '{model_name}'!")
