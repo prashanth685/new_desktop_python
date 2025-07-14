@@ -50,29 +50,28 @@ class TimeViewFeature:
         self.plots = []
         self.fifo_data = []  # FIFO buffers for each channel
         self.fifo_times = []  # FIFO time buffers
-        self.sample_rate = 4096
-        self.num_channels = 4
+        self.sample_rate = None
+        self.main_channels = None
+        self.tacho_channels_count = None
+        self.total_channels = None
         self.scaling_factor = 3.3 / 65535
-        self.num_plots = 6
-        self.channel_samples = 4096
-        self.tacho_samples = 4096
+        self.num_plots = None
+        self.samples_per_channel = None
         self.vlines = []
         self.proxies = []
         self.trackers = []
         self.trigger_lines = []
         self.active_line_idx = None
         self.window_seconds = 1  # Default window size in seconds
-        self.fifo_window_samples = self.sample_rate * self.window_seconds
+        self.fifo_window_samples = None
         self.settings_panel = None
         self.settings_button = None
         self.refresh_timer = None
-        self.needs_refresh = [True] * self.num_plots  # Flag for plot updates
+        self.needs_refresh = []  # Flag for plot updates
         self.initUI()
-        self.load_project_data()
-        self.initialize_buffers()
 
     def initUI(self):
-        """Initialize the UI with pyqtgraph subplots and settings panel."""
+        """Initialize the UI with settings panel and placeholder for dynamic plots."""
         self.widget = QWidget()
         main_layout = QVBoxLayout()
 
@@ -110,22 +109,57 @@ class TimeViewFeature:
         main_layout.addWidget(self.settings_panel)
 
         # Create a scroll area to contain the plots
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_content = QWidget()
-        scroll_layout = QVBoxLayout(scroll_content)
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_area.setWidget(self.scroll_content)
+        main_layout.addWidget(self.scroll_area)
+        self.widget.setLayout(main_layout)
 
-        colors = ['r', 'g', 'b', 'y', 'c', 'm']
+        # Initialize refresh timer
+        self.refresh_timer = QTimer()
+        self.refresh_timer.timeout.connect(self.refresh_plots)
+        self.refresh_timer.start(100)  # Refresh every 100ms
+
+        if not self.model_name and self.console:
+            self.console.append_to_console("No model selected in TimeViewFeature.")
+        if not self.channel and self.console:
+            self.console.append_to_console("No channel selected in TimeViewFeature.")
+
+    def initialize_plots(self):
+        """Initialize plots based on dynamically received channel counts."""
+        if not self.main_channels or not self.tacho_channels_count or not self.total_channels:
+            logging.error("Cannot initialize plots: channel counts not set")
+            return
+
+        # Clear existing plots
+        self.plot_widgets = []
+        self.plots = []
+        self.fifo_data = []
+        self.fifo_times = []
+        self.vlines = []
+        self.proxies = []
+        self.trackers = []
+        self.trigger_lines = []
+        self.needs_refresh = []
+
+        # Clear existing scroll content
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+
+        colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', 'w', '#FF4500', '#32CD32', '#00CED1', '#FFD700', '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']  # Extended color list for up to 20+ channels
+        self.num_plots = self.total_channels
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
             plot_widget.setFixedHeight(250)
             plot_widget.setMinimumWidth(0)
-            if i < self.num_channels:
+            if i < self.main_channels:
                 plot_widget.setLabel('left', f'CH{i+1} Value')
-            elif i == self.num_channels:
+            elif i == self.main_channels:
                 plot_widget.setLabel('left', 'Tacho Frequency')
             else:
-                plot_widget.setLabel('left', 'Tacho Trigger')
+                plot_widget.setLabel('left', f'Tacho Trigger {i - self.main_channels}')
                 plot_widget.setYRange(-0.5, 1.5, padding=0)
             plot_widget.showGrid(x=True, y=True)
             plot_widget.addLegend()
@@ -135,6 +169,7 @@ class TimeViewFeature:
             self.plot_widgets.append(plot_widget)
             self.fifo_data.append([])
             self.fifo_times.append([])
+            self.needs_refresh.append(True)
 
             vline = InfiniteLine(angle=90, movable=False, pen=mkPen('r', width=2))
             vline.setVisible(False)
@@ -153,24 +188,16 @@ class TimeViewFeature:
             plot_widget.viewport().installEventFilter(tracker)
             self.trackers.append(tracker)
 
-            scroll_layout.addWidget(plot_widget)
+            self.scroll_layout.addWidget(plot_widget)
 
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
-        self.widget.setLayout(main_layout)
-
-        # Initialize refresh timer
-        self.refresh_timer = QTimer()
-        self.refresh_timer.timeout.connect(self.refresh_plots)
-        self.refresh_timer.start(100)  # Refresh every 100ms
-
-        if not self.model_name and self.console:
-            self.console.append_to_console("No model selected in TimeViewFeature.")
-        if not self.channel and self.console:
-            self.console.append_to_console("No channel selected in TimeViewFeature.")
+        self.scroll_area.setWidget(self.scroll_content)
+        self.initialize_buffers()
 
     def initialize_buffers(self):
         """Initialize FIFO buffers for each channel."""
+        if not self.sample_rate or not self.num_plots or not self.samples_per_channel:
+            logging.error("Cannot initialize buffers: sample_rate, num_plots, or samples_per_channel not set")
+            return
         self.fifo_window_samples = self.sample_rate * self.window_seconds
         for i in range(self.num_plots):
             self.fifo_data[i] = np.zeros(self.fifo_window_samples)
@@ -179,17 +206,15 @@ class TimeViewFeature:
         logging.debug(f"Initialized FIFO buffers: {self.num_plots} channels, {self.fifo_window_samples} samples each")
 
     def load_project_data(self):
-        """Load project data to determine number of channels."""
+        """Load project data to initialize model information."""
         try:
             project_data = self.db.get_project_data(self.project_name)
             if project_data and "models" in project_data:
                 for model in project_data["models"]:
                     if model.get("name") == self.model_name:
-                        available_channels = len(model.get("channels", []))
-                        self.num_channels = min(available_channels, 4)
-                        logging.debug(f"Loaded project data: {self.num_channels} channels for model {self.model_name}")
+                        logging.debug(f"Loaded project data for model {self.model_name}")
                         if self.console:
-                            self.console.append_to_console(f"Loaded {self.num_channels} channels for model {self.model_name}")
+                            self.console.append_to_console(f"Loaded project data for model {self.model_name}")
                         return
                 self.log_and_set_status(f"No model data found for {self.model_name}")
             else:
@@ -227,6 +252,9 @@ class TimeViewFeature:
 
     def update_window_size(self):
         """Update FIFO buffer sizes when window_seconds changes."""
+        if not self.sample_rate:
+            logging.error("Cannot update window size: sample_rate not set")
+            return
         new_fifo_window_samples = self.sample_rate * self.window_seconds
         for i in range(self.num_plots):
             current_data = self.fifo_data[i]
@@ -305,50 +333,62 @@ class TimeViewFeature:
             logging.debug(f"Ignoring data for model {model_name}, expected {self.model_name}")
             return
         try:
-            if not values or len(values) != 6:
-                self.log_and_set_status(f"Received incorrect number of sublists: {len(values) if values else 0}, expected 6")
-                return
-
+            # Dynamically set channel counts from MQTT data
+            self.main_channels = len(values) - 2 if len(values) >= 2 else 0  # header[2] equivalent
+            self.tacho_channels_count = 2  # header[6] equivalent, assuming 2 tacho channels
+            self.total_channels = self.main_channels + self.tacho_channels_count
+            self.num_plots = self.total_channels
             self.sample_rate = sample_rate
-            self.channel_samples = 4096
-            self.tacho_samples = 4096
+            self.samples_per_channel = len(values[0]) if values else 0
 
-            for ch in range(self.num_channels):
-                if len(values[ch]) != self.channel_samples:
-                    self.log_and_set_status(f"Channel {ch+1} has {len(values[ch])} samples, expected {self.channel_samples}")
-                    return
-
-            tacho_freq_samples = len(values[4])
-            tacho_trigger_samples = len(values[5])
-            if tacho_freq_samples != self.tacho_samples or tacho_trigger_samples != self.tacho_samples:
-                self.log_and_set_status(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}, expected={self.tacho_samples}")
+            if not self.main_channels or not values or len(values) < self.tacho_channels_count:
+                self.log_and_set_status(f"Received incorrect number of sublists: {len(values) if values else 0}, expected at least {self.tacho_channels_count}")
                 return
+
+            if not all(len(values[i]) == self.samples_per_channel for i in range(self.main_channels)):
+                self.log_and_set_status(f"Channel data length mismatch: expected {self.samples_per_channel} samples")
+                return
+
+            tacho_freq_samples = len(values[self.main_channels]) if self.main_channels < len(values) else 0
+            tacho_trigger_samples = len(values[self.main_channels + 1]) if self.main_channels + 1 < len(values) else 0
+            if tacho_freq_samples != self.samples_per_channel or tacho_trigger_samples != self.samples_per_channel:
+                self.log_and_set_status(f"Tacho data length mismatch: freq={tacho_freq_samples}, trigger={tacho_trigger_samples}, expected={self.samples_per_channel}")
+                return
+
+            # Initialize plots and buffers if not already done or if channel counts changed
+            if not self.fifo_data or len(self.fifo_data) != self.num_plots:
+                self.fifo_data = [[] for _ in range(self.num_plots)]
+                self.fifo_times = [[] for _ in range(self.num_plots)]
+                self.needs_refresh = [True] * self.num_plots
+                self.initialize_plots()
 
             # Update FIFO buffers
             current_time = time.time()
             time_step = 1.0 / sample_rate
-            new_times = np.array([current_time - (self.channel_samples - 1 - i) * time_step for i in range(self.channel_samples)])
+            new_times = np.array([current_time - (self.samples_per_channel - 1 - i) * time_step for i in range(self.samples_per_channel)])
 
             # Shift and append data
-            for ch in range(self.num_channels):
+            for ch in range(self.main_channels):
                 new_data = np.array(values[ch]) * self.scaling_factor
-                self.fifo_data[ch] = np.roll(self.fifo_data[ch], -self.channel_samples)
-                self.fifo_data[ch][-self.channel_samples:] = new_data
+                self.fifo_data[ch] = np.roll(self.fifo_data[ch], -self.samples_per_channel)
+                self.fifo_data[ch][-self.samples_per_channel:] = new_data
                 self.needs_refresh[ch] = True
 
-            self.fifo_data[self.num_channels] = np.roll(self.fifo_data[self.num_channels], -self.tacho_samples)
-            self.fifo_data[self.num_channels][-self.tacho_samples:] = np.array(values[4]) / 100
-            self.needs_refresh[self.num_channels] = True
+            if self.tacho_channels_count >= 1:
+                self.fifo_data[self.main_channels] = np.roll(self.fifo_data[self.main_channels], -self.samples_per_channel)
+                self.fifo_data[self.main_channels][-self.samples_per_channel:] = np.array(values[self.main_channels]) / 100
+                self.needs_refresh[self.main_channels] = True
 
-            self.fifo_data[self.num_channels + 1] = np.roll(self.fifo_data[self.num_channels + 1], -self.tacho_samples)
-            self.fifo_data[self.num_channels + 1][-self.tacho_samples:] = np.array(values[5])
-            self.needs_refresh[self.num_channels + 1] = True
+            if self.tacho_channels_count >= 2:
+                self.fifo_data[self.main_channels + 1] = np.roll(self.fifo_data[self.main_channels + 1], -self.samples_per_channel)
+                self.fifo_data[self.main_channels + 1][-self.samples_per_channel:] = np.array(values[self.main_channels + 1])
+                self.needs_refresh[self.main_channels + 1] = True
 
             # Update time buffer
             for ch in range(self.num_plots):
-                self.fifo_times[ch] = np.roll(self.fifo_times[ch], -self.channel_samples)
-                base_time = self.fifo_times[ch][-self.channel_samples - 1] if len(self.fifo_times[ch]) > self.channel_samples else 0
-                self.fifo_times[ch][-self.channel_samples:] = base_time + np.array([(i + 1) * time_step for i in range(self.channel_samples)])
+                self.fifo_times[ch] = np.roll(self.fifo_times[ch], -self.samples_per_channel)
+                base_time = self.fifo_times[ch][-self.samples_per_channel - 1] if len(self.fifo_times[ch]) > self.samples_per_channel else 0
+                self.fifo_times[ch][-self.samples_per_channel:] = base_time + np.array([(i + 1) * time_step for i in range(self.samples_per_channel)])
 
             if self.is_saving:
                 try:
@@ -357,13 +397,13 @@ class TimeViewFeature:
                         "filename": self.current_filename,
                         "frameIndex": 0,
                         "message": {
-                            "channel_data": [list(values[i]) for i in range(self.num_channels)],
-                            "tacho_freq": list(values[self.num_channels]),
-                            "tacho_trigger": list(values[self.num_channels + 1])
+                            "channel_data": [list(values[i]) for i in range(self.main_channels)],
+                            "tacho_freq": list(values[self.main_channels]) if self.tacho_channels_count >= 1 else [],
+                            "tacho_trigger": list(values[self.main_channels + 1]) if self.tacho_channels_count >= 2 else []
                         },
-                        "numberOfChannels": self.num_channels,
+                        "numberOfChannels": self.main_channels,
                         "samplingRate": self.sample_rate,
-                        "samplingSize": self.channel_samples,
+                        "samplingSize": self.samples_per_channel,
                         "messageFrequency": None,
                         "createdAt": datetime.now().isoformat()
                     }
@@ -377,7 +417,7 @@ class TimeViewFeature:
                 except Exception as e:
                     self.log_and_set_status(f"Error saving data to database: {str(e)}")
 
-            logging.debug(f"Updated FIFO buffers: {self.channel_samples} new samples, window={self.window_seconds}s")
+            logging.debug(f"Updated FIFO buffers: {self.samples_per_channel} new samples, window={self.window_seconds}s")
         except Exception as e:
             self.log_and_set_status(f"Error processing MQTT data: {str(e)}")
 
@@ -391,16 +431,16 @@ class TimeViewFeature:
                     if len(data) > 0 and len(times) > 0:
                         self.plots[ch].setData(times, data)
                         self.plot_widgets[ch].setXRange(times[-self.fifo_window_samples], times[-1], padding=0)
-                        if ch < self.num_channels:
+                        if ch < self.main_channels:
                             self.plot_widgets[ch].enableAutoRange(axis='y')
-                        elif ch == self.num_channels:
+                        elif ch == self.main_channels:
                             self.plot_widgets[ch].enableAutoRange(axis='y')
                         else:
                             self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
                     else:
                         self.log_and_set_status(f"No data for plot {ch}, data_len={len(data)}, times_len={len(times)}")
 
-                    # Update trigger lines for tacho trigger channel
+                    # Update trigger lines for the last tacho channel
                     if ch == self.num_plots - 1:
                         if self.trigger_lines:
                             for line in self.trigger_lines:

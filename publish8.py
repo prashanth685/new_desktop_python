@@ -69,11 +69,11 @@ class MQTTPublisher(QObject):
             header = [
                 self.frame_index % 65535,  # Frame index low
                 self.frame_index // 65535,  # Frame index high
-                self.num_channels,         # Number of channels (4)
+                self.num_channels,         # Number of channels (4)header[2]
                 self.sample_rate,          # Sample rate (4096)
                 16,                        # Bit depth
                 self.samples_per_channel,  # Samples per channel (4096)
-                self.num_tacho_channels,   # Number of tacho channels (2)
+                self.num_tacho_channels,   # Number of tacho channels (2)header[6]
                 0, 0, 0                   # Reserved
             ]
             while len(header) < 100:

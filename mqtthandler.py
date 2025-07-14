@@ -96,48 +96,62 @@ class MQTTHandler(QObject):
                     logging.warning(f"Payload too short: {len(values)} samples")
                     return
 
-                # Header: first 100 values
+                # Header: first 10 values
                 header = values[:100]
                 total_values = values[100:]
 
-                # Extract header values with defaults
-                num_channels = header[2] if len(header) > 2 and header[2] > 0 else 4
-                sample_rate = header[3] if len(header) > 3 and header[3] > 0 else 4096
-                samples_per_channel = 4096
-                num_tacho_channels = header[6] if len(header) > 6 and header[6] > 0 else 2
+                # Extract header values dynamically
+                if len(header) < 100:
+                    logging.error(f"Header too short: {len(header)} values, expected at least 7")
+                    return
+                main_channels = header[2]
+                sample_rate = header[3]
+                tacho_channels_count = header[6]
+                total_channels = main_channels + tacho_channels_count
+                samples_per_channel = (len(total_values) // total_channels) if total_values else 0
+
+                # Validate header values
+                if main_channels <= 0 or sample_rate <= 0 or tacho_channels_count <= 0 or samples_per_channel <= 0:
+                    logging.error(f"Invalid header values: main_channels={main_channels}, sample_rate={sample_rate}, "
+                                 f"tacho_channels_count={tacho_channels_count}, samples_per_channel={samples_per_channel}")
+                    return
 
                 # Calculate expected number of data points
-                expected_main = samples_per_channel * num_channels
-                expected_tacho = 4096 * num_tacho_channels
-                expected_total = expected_main + expected_tacho
-                logging.debug(f" total values coming {expected_total}") 
+                expected_total = samples_per_channel * total_channels
+                logging.debug(f"Total values expected: {expected_total}")
 
                 if len(total_values) != expected_total:
                     logging.warning(f"Unexpected data length: got {len(total_values)}, expected {expected_total}")
                     logging.debug(f"Header: {header}")
-                    logging.debug(f"Num channels: {num_channels}, Samples per channel: {samples_per_channel}, Num tacho channels: {num_tacho_channels}")
+                    logging.debug(f"Main channels: {main_channels}, Tacho channels: {tacho_channels_count}, Samples per channel: {samples_per_channel}")
                     return
 
                 # Extract and deinterleave main channel data
-                main_data = total_values[:expected_main]
-                tacho_freq_data = total_values[expected_main:expected_main + 4096]
-                tacho_trigger_data = total_values[expected_main + 4096:expected_main + 8192]
+                main_data = total_values[:samples_per_channel * main_channels]
+                tacho_data = total_values[samples_per_channel * main_channels:]
 
-                channel_data = [[] for _ in range(num_channels)]
-                for i in range(0, len(main_data), num_channels):
-                    for ch in range(num_channels):
+                channel_data = [[] for _ in range(main_channels)]
+                for i in range(0, len(main_data), main_channels):
+                    for ch in range(main_channels):
                         channel_data[ch].append(main_data[i + ch])
+
+                # Split tacho data into frequency and trigger
+                tacho_freq_data = tacho_data[:samples_per_channel] if tacho_channels_count >= 1 else []
+                tacho_trigger_data = tacho_data[samples_per_channel:2 * samples_per_channel] if tacho_channels_count >= 2 else []
 
                 # Convert to float for channels and include tacho data
                 values = [[float(v) for v in ch] for ch in channel_data]
-                values.append([float(v) for v in tacho_freq_data])
-                values.append([float(v) for v in tacho_trigger_data])
+                if tacho_freq_data:
+                    values.append([float(v) for v in tacho_freq_data])
+                if tacho_trigger_data:
+                    values.append([float(v) for v in tacho_trigger_data])
 
                 logging.debug(f"Parsed binary payload:")
-                logging.debug(f" - Channels: {num_channels}")
-                logging.debug(f" - Samples/channel: {len(channel_data[0])}")
-                logging.debug(f" - Tacho freq (first 5): {tacho_freq_data[:5]}")
-                logging.debug(f" - Tacho trigger (first 10): {tacho_trigger_data[:10]}")
+                logging.debug(f" - Main Channels: {main_channels}")
+                logging.debug(f" - Total Channels: {total_channels}")
+                logging.debug(f" - Samples/channel: {samples_per_channel}")
+                logging.debug(f" - Tacho freq (first 5): {tacho_freq_data[:5] if tacho_freq_data else []}")
+                logging.debug(f" - Tacho trigger (first 10): {tacho_trigger_data[:10] if tacho_trigger_data else []}")
 
             if model_name:
                 self.data_received.emit(tag_name, model_name, values, sample_rate)
