@@ -345,7 +345,6 @@ class DashboardWindow(QWidget):
 
     def on_data_received(self, feature_name, tag_name, model_name, values, sample_rate):
         try:
-            # Update only the relevant feature instances
             for key, feature_instance in self.feature_instances.items():
                 instance_feature, instance_model, instance_channel, _ = key
                 if instance_feature == feature_name and instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
@@ -459,44 +458,62 @@ class DashboardWindow(QWidget):
                 QMessageBox.warning(self, "Error", f"Error deleting project: {str(e)}")
 
     def start_saving(self):
-        if self.current_feature != "Time View":
-            QMessageBox.warning(self, "Error", "Saving is only available in Time View!")
-            return
         selected_model = self.tree_view.get_selected_model()
         if not selected_model:
             QMessageBox.warning(self, "Error", "Please select a model to save data!")
             return
-        # Find the most recent Time View instance for the selected model
-        time_view_keys = [k for k in self.feature_instances.keys() if k[0] == "Time View" and k[1] == selected_model]
-        if not time_view_keys:
-            QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
+        if not self.current_project:
+            QMessageBox.warning(self, "Error", "No project selected!")
             return
-        key = max(time_view_keys, key=lambda k: k[3])  # Use the most recent instance based on unique_id
-        feature_instance = self.feature_instances.get(key)
-        try:
-            feature_instance.start_saving()
-            self.is_saving = True
-            self.sub_tool_bar.update_subtoolbar()
-            logging.info("Started saving data from dashboard")
-            self.file_bar.update_file_bar()
-        except Exception as e:
-            logging.error(f"Failed to start saving: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to start saving: {str(e)}")
+
+        # Check for existing TimeViewFeature instances for the selected model
+        time_view_keys = [k for k in self.feature_instances.keys() if k[0] == "Time View" and k[1] == selected_model]
+        
+        if time_view_keys:
+            # Use the most recent instance
+            key = max(time_view_keys, key=lambda k: k[3])  # Most recent based on unique_id
+            feature_instance = self.feature_instances.get(key)
+            try:
+                feature_instance.start_saving()
+                self.is_saving = True
+                self.sub_tool_bar.update_subtoolbar()
+                logging.info("Started saving data from existing TimeViewFeature")
+                self.file_bar.update_file_bar()
+            except Exception as e:
+                logging.error(f"Failed to start saving: {str(e)}")
+                QMessageBox.warning(self, "Error", f"Failed to start saving: {str(e)}")
+        else:
+            # Create a new TimeViewFeature instance for saving
+            try:
+                if not self.db.is_connected():
+                    self.db.reconnect()
+                unique_id = int(time.time() * 1000)
+                key = ("Time View", selected_model, None, unique_id)
+                feature_instance = TimeViewFeature(
+                    self, self.db, self.current_project, model_name=selected_model, console=self.console
+                )
+                self.feature_instances[key] = feature_instance
+                # Do not create a subwindow; initialize for saving only
+                feature_instance.start_saving()
+                self.is_saving = True
+                self.sub_tool_bar.update_subtoolbar()
+                logging.info(f"Created new TimeViewFeature for saving data, key: {key}")
+                self.file_bar.update_file_bar()
+            except Exception as e:
+                logging.error(f"Failed to create and start saving with new TimeViewFeature: {str(e)}")
+                QMessageBox.warning(self, "Error", f"Failed to start saving: {str(e)}")
 
     def stop_saving(self):
-        if self.current_feature != "Time View":
-            QMessageBox.warning(self, "Error", "Saving is only available in Time View!")
-            return
         selected_model = self.tree_view.get_selected_model()
         if not selected_model:
             QMessageBox.warning(self, "Error", "Please select a model to stop saving!")
             return
-        # Find the most recent Time View instance for the selected model
+        # Find the most recent TimeViewFeature instance for the selected model
         time_view_keys = [k for k in self.feature_instances.keys() if k[0] == "Time View" and k[1] == selected_model]
         if not time_view_keys:
-            QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
+            QMessageBox.warning(self, "Error", "No Time View feature initialized for the selected model!")
             return
-        key = max(time_view_keys, key=lambda k: k[3])  # Use the most recent instance based on unique_id
+        key = max(time_view_keys, key=lambda k: k[3])  # Most recent instance based on unique_id
         feature_instance = self.feature_instances.get(key)
         try:
             feature_instance.stop_saving()
@@ -570,7 +587,6 @@ class DashboardWindow(QWidget):
                 unique_id = int(time.time() * 1000)
                 key = (feature_name, selected_model, channel, unique_id)
 
-                # Create new feature instance and subwindow
                 try:
                     if not self.db.is_connected():
                         self.db.reconnect()

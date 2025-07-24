@@ -1,11 +1,10 @@
-# from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QSplitter, QPushButton, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel
+# import numpy as np
+# from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QScrollArea, QPushButton, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel
 # from PyQt5.QtCore import Qt
 # from PyQt5.QtGui import QIcon
-# import numpy as np
 # import pyqtgraph as pg
 # from datetime import datetime
 # from pymongo import MongoClient
-# from bson.objectid import ObjectId
 # import scipy.signal as signal
 # import logging
 
@@ -81,6 +80,8 @@
 #         self.selected_channel_idx = 0
 #         self.tag_name = ""
 #         self.channel_selector = None
+#         self.scroll_content = None
+#         self.scroll_layout = None
 #         self.initUI()
 #         self.initialize_async()
 
@@ -142,17 +143,13 @@
 
 #         layout.addWidget(self.settings_panel)
 
-#         # Splitter for table and plots
-#         splitter = QSplitter(Qt.Vertical)
-#         layout.addWidget(splitter)
-
 #         # Table setup
 #         self.table = QTableWidget()
 #         self.table.setRowCount(self.num_channels)
 #         self.table.setColumnCount(len(headers))
 #         self.table.setHorizontalHeaderLabels(headers)
 #         self.table.setFixedHeight(100 * self.num_channels)  # Adjust height for rows
-#         splitter.addWidget(self.table)
+#         layout.addWidget(self.table)
 
 #         # Initialize table with default values
 #         default_data = {
@@ -176,7 +173,30 @@
 #             for col, header in enumerate(headers):
 #                 self.table.setItem(row, col, QTableWidgetItem(default_data[header]))
 
-#         # Plot widgets
+#         # Scroll area for plots
+#         scroll_area = QScrollArea()
+#         scroll_area.setWidgetResizable(True)
+#         self.scroll_content = QWidget()
+#         self.scroll_layout = QVBoxLayout(self.scroll_content)
+#         scroll_area.setWidget(self.scroll_content)
+#         layout.addWidget(scroll_area)
+
+#         # Initialize plots for the selected channel
+#         self.initialize_plots()
+
+#         if self.console:
+#             self.console.append_to_console(f"Initialized UI with {self.num_channels} channels: {self.channel_names}")
+
+#     def initialize_plots(self):
+#         """Initialize plot widgets for the selected channel."""
+#         # Clear existing plots
+#         for widget in self.plot_widgets:
+#             self.scroll_layout.removeWidget(widget)
+#             widget.deleteLater()
+#         self.plot_widgets = []
+#         self.plots = []
+
+#         # Plot titles
 #         plot_titles = [
 #             "Raw Data",
 #             "Low-Pass Filtered Data (100 Hz Cutoff)",
@@ -184,38 +204,38 @@
 #             "Band-Pass Filtered Data (50-200 Hz)",
 #             "Bandpass Average Peak-to-Peak Over Frequency"
 #         ]
-#         self.plot_widgets = []
-#         self.plots = []
-#         for i in range(5):
-#             plot_widget = pg.PlotWidget(title=plot_titles[i])
+
+#         # Create plot widgets for the selected channel
+#         for i, title in enumerate(plot_titles):
+#             plot_widget = pg.PlotWidget(title=title)
 #             plot_widget.showGrid(x=True, y=True)
 #             plot_widget.setLabel('bottom', 'Time (s)' if i < 4 else 'Frequency (Hz)')
 #             plot_widget.setLabel('left', 'Amplitude' if i < 4 else 'Peak-to-Peak Value')
-#             splitter.addWidget(plot_widget)
+#             plot_widget.setFixedHeight(250)  # Set a fixed height for each plot
+#             self.scroll_layout.addWidget(plot_widget)
 #             self.plot_widgets.append(plot_widget)
 #             plot = plot_widget.plot(pen='b')
 #             plot.setData(np.array([0]), np.array([0]))  # Initialize empty plot
 #             self.plots.append(plot)
 
-#         splitter.setSizes([100 * self.num_channels, 600])
-
-#         if self.console:
-#             self.console.append_to_console(f"Initialized UI with {self.num_channels} channels: {self.channel_names}")
+#         self.scroll_layout.addStretch()  # Add stretch to keep plots at the top
+#         self.plot_initialized = True
+#         self.update_plots()
 
 #     def get_widget(self):
 #         return self.widget
 
 #     def update_selected_channel(self, index):
+#         """Update the selected channel and refresh plots."""
 #         if index > 0:  # Skip "Select Channel" option
 #             self.selected_channel_idx = index - 1
-#             self.update_plots()
 #             if self.console:
 #                 self.console.append_to_console(f"Selected channel for plots: {self.channel_names[self.selected_channel_idx]}")
 #         else:
 #             self.selected_channel_idx = 0
-#             self.update_plots()
 #             if self.console:
 #                 self.console.append_to_console("No valid channel selected for plots, defaulting to first channel.")
+#         self.update_plots()
 
 #     def initialize_async(self):
 #         try:
@@ -233,7 +253,7 @@
 #                 self.channel_selector.setCurrentIndex(1)
 #                 self.initialize_data_arrays()
 #                 self.update_table_defaults()
-#                 self.update_plots()
+#                 self.initialize_plots()
 #                 return
 
 #             self.project_id = project["_id"]
@@ -249,7 +269,7 @@
 #                 self.channel_selector.setCurrentIndex(1)
 #                 self.initialize_data_arrays()
 #                 self.update_table_defaults()
-#                 self.update_plots()
+#                 self.initialize_plots()
 #                 return
 
 #             self.channel_names = [c.get("channelName", f"Channel {i+1}") for i, c in enumerate(model["channels"])]
@@ -294,7 +314,7 @@
 
 #             self.update_table_defaults()
 #             self.load_settings_from_database()
-#             self.update_plots()  # Initial plot update
+#             self.initialize_plots()
 #         except Exception as ex:
 #             self.log_and_set_status(f"Error initializing TabularView: {str(ex)}")
 #             self.channel_names = ["Channel 1"]
@@ -306,7 +326,7 @@
 #             self.channel_selector.setCurrentIndex(1)
 #             self.initialize_data_arrays()
 #             self.update_table_defaults()
-#             self.update_plots()
+#             self.initialize_plots()
 
 #     def initialize_data_arrays(self):
 #         self.raw_data = [np.zeros(4096) for _ in range(self.num_channels)]
@@ -708,7 +728,10 @@
 #             self.table.setItem(row, col, QTableWidgetItem(data[header]))
 
 #     def update_plots(self):
-#         self.plot_initialized = True
+#         """Update all plots for the selected channel."""
+#         if not self.plot_initialized:
+#             self.log_and_set_status("Plots not initialized, skipping update.")
+#             return
 
 #         if self.selected_channel_idx >= self.num_channels:
 #             self.selected_channel_idx = 0
@@ -746,6 +769,7 @@
 #             if self.console:
 #                 self.console.append_to_console(f"Updated plot {i+1} for channel {channel_name}: {len(trimmed_data)} samples")
 
+#         # Update peak-to-peak plot
 #         self.plots[4].clear()
 #         frequency_values = [self.average_frequency[ch] + (i * 0.1) for i in range(len(self.band_pass_peak_to_peak_history[ch]))]
 #         if frequency_values and self.band_pass_peak_to_peak_history[ch]:
@@ -760,6 +784,7 @@
 #                 self.console.append_to_console(f"Channel {channel_name}: No data for bandpass peak-to-peak plot")
 
 #     def log_and_set_status(self, message):
+#         logging.error(message)
 #         if self.console:
 #             self.console.append_to_console(message)
 
@@ -769,9 +794,10 @@
 
 
 
+
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QTableWidget, QTableWidgetItem, QScrollArea, QPushButton, QCheckBox, QComboBox, QGridLayout, QHBoxLayout, QLabel
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, QThread, QObject, pyqtSignal
 from PyQt5.QtGui import QIcon
 import pyqtgraph as pg
 from datetime import datetime
@@ -801,6 +827,68 @@ class TabularViewSettings:
         self.twiddle_factor_visible = True
         self.updated_at = datetime.utcnow()
 
+class TabularViewWorker(QObject):
+    """Worker class to handle initialization tasks in a separate thread."""
+    finished = pyqtSignal()
+    error = pyqtSignal(str)
+    initialized = pyqtSignal(list, int, str, dict)  # channel_names, num_channels, tag_name, channel_properties
+
+    def __init__(self, parent, project_name, model_name, channel, db):
+        super().__init__()
+        self.parent = parent
+        self.project_name = project_name
+        self.model_name = model_name
+        self.channel = channel
+        self.db = db
+        self.mongo_client = MongoClient("mongodb://localhost:27017")
+
+    def run(self):
+        """Perform initialization tasks in a separate thread."""
+        try:
+            database = self.mongo_client.get_database("changed_db")
+            projects_collection = database.get_collection("projects")
+            project = projects_collection.find_one({"project_name": self.project_name, "email": self.db.email})
+            if not project:
+                self.error.emit(f"Project {self.project_name} not found for email {self.db.email}. Using default channel.")
+                self.initialized.emit(["Channel 1"], 1, "", {})
+                return
+
+            project_id = project["_id"]
+            model = next((m for m in project["models"] if m["name"] == self.model_name), None)
+            if not model or not model.get("channels"):
+                self.error.emit(f"Model {self.model_name} or channels not found in project {self.project_name}. Using default channel.")
+                self.initialized.emit(["Channel 1"], 1, "", {})
+                return
+
+            channel_names = [c.get("channelName", f"Channel {i+1}") for i, c in enumerate(model["channels"])]
+            num_channels = len(channel_names)
+            if not channel_names:
+                self.error.emit("No channels found in model. Using default channel.")
+                self.initialized.emit(["Channel 1"], 1, "", {})
+                return
+
+            channel_properties = {}
+            for channel in model["channels"]:
+                channel_name = channel.get("channelName", "Unknown")
+                correction_value = float(channel.get("CorrectionValue", "1.0")) if channel.get("CorrectionValue") else 1.0
+                gain = float(channel.get("Gain", "1.0")) if channel.get("Gain") else 1.0
+                sensitivity = float(channel.get("Sensitivity", "1.0")) if channel.get("Sensitivity") and float(channel.get("Sensitivity")) != 0 else 1.0
+                channel_properties[channel_name] = {
+                    "Unit": channel.get("Unit", "mil").lower(),
+                    "CorrectionValue": correction_value,
+                    "Gain": gain,
+                    "Sensitivity": sensitivity
+                }
+
+            tag_name = model.get("tagName", "")
+            self.initialized.emit(channel_names, num_channels, tag_name, channel_properties)
+        except Exception as ex:
+            self.error.emit(f"Error initializing TabularView: {str(ex)}")
+            self.initialized.emit(["Channel 1"], 1, "", {})
+        finally:
+            self.mongo_client.close()
+            self.finished.emit()
+
 class TabularViewFeature:
     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
         self.parent = parent
@@ -812,8 +900,8 @@ class TabularViewFeature:
         self.widget = None
         self.data = None
         self.sample_rate = 4096
-        self.num_channels = 1  # Default, updated in initialize_async
-        self.channel_names = ["Channel 1"]  # Default
+        self.num_channels = 1
+        self.channel_names = ["Channel 1"]
         self.channel_properties = {}
         self.project_id = None
         self.raw_data = [np.zeros(4096)]
@@ -843,7 +931,6 @@ class TabularViewFeature:
             "Twiddle Factor": True
         }
         self.bandpass_selection = "None"
-        self.mongo_client = MongoClient("mongodb://localhost:27017")
         self.plot_initialized = False
         self.table = None
         self.plot_widgets = []
@@ -854,7 +941,7 @@ class TabularViewFeature:
         self.scroll_content = None
         self.scroll_layout = None
         self.initUI()
-        self.initialize_async()
+        self.initialize_thread()
 
     def initUI(self):
         pg.setConfigOption('background', 'w')
@@ -864,10 +951,9 @@ class TabularViewFeature:
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        # Settings and channel selection
         top_layout = QHBoxLayout()
         self.settings_button = QPushButton("Settings")
-        self.settings_button.setIcon(QIcon("settings_icon.png"))  # Replace with your image path
+        self.settings_button.setIcon(QIcon("settings_icon.png"))
         self.settings_button.clicked.connect(self.toggle_settings)
         top_layout.addWidget(self.settings_button)
 
@@ -880,18 +966,15 @@ class TabularViewFeature:
         top_layout.addStretch()
         layout.addLayout(top_layout)
 
-        # Settings panel
         self.settings_panel = QWidget()
         self.settings_panel.setVisible(False)
         settings_layout = QGridLayout()
         self.settings_panel.setLayout(settings_layout)
 
-        # Bandpass selection
         self.bandpass_combo = QComboBox()
         self.bandpass_combo.addItems(["None", "50-200 Hz", "100-300 Hz"])
         settings_layout.addWidget(self.bandpass_combo, 0, 0, 1, 2)
 
-        # Checkboxes for column visibility
         headers = [
             "RPM", "Gap", "Channel Name", "DateTime", "Direct",
             "1x Amp", "1x Phase", "2x Amp", "2x Phase", "nx Amp", "nx Phase",
@@ -904,7 +987,6 @@ class TabularViewFeature:
             self.checkbox_dict[header] = cb
             settings_layout.addWidget(cb, (i // 2) + 1, i % 2)
 
-        # Save and Close buttons
         self.save_settings_button = QPushButton("Save")
         self.save_settings_button.clicked.connect(self.save_settings)
         self.close_settings_button = QPushButton("Close")
@@ -914,15 +996,13 @@ class TabularViewFeature:
 
         layout.addWidget(self.settings_panel)
 
-        # Table setup
         self.table = QTableWidget()
         self.table.setRowCount(self.num_channels)
         self.table.setColumnCount(len(headers))
         self.table.setHorizontalHeaderLabels(headers)
-        self.table.setFixedHeight(100 * self.num_channels)  # Adjust height for rows
+        self.table.setFixedHeight(100 * self.num_channels)
         layout.addWidget(self.table)
 
-        # Initialize table with default values
         default_data = {
             "Channel Name": "N/A",
             "DateTime": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -944,7 +1024,6 @@ class TabularViewFeature:
             for col, header in enumerate(headers):
                 self.table.setItem(row, col, QTableWidgetItem(default_data[header]))
 
-        # Scroll area for plots
         scroll_area = QScrollArea()
         scroll_area.setWidgetResizable(True)
         self.scroll_content = QWidget()
@@ -952,105 +1031,32 @@ class TabularViewFeature:
         scroll_area.setWidget(self.scroll_content)
         layout.addWidget(scroll_area)
 
-        # Initialize plots for the selected channel
         self.initialize_plots()
 
         if self.console:
             self.console.append_to_console(f"Initialized UI with {self.num_channels} channels: {self.channel_names}")
 
-    def initialize_plots(self):
-        """Initialize plot widgets for the selected channel."""
-        # Clear existing plots
-        for widget in self.plot_widgets:
-            self.scroll_layout.removeWidget(widget)
-            widget.deleteLater()
-        self.plot_widgets = []
-        self.plots = []
+    def initialize_thread(self):
+        """Start initialization in a separate QThread."""
+        self.worker = TabularViewWorker(self, self.project_name, self.model_name, self.channel, self.db)
+        self.thread = QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.error.connect(self.log_and_set_status)
+        self.worker.initialized.connect(self.complete_initialization)
+        self.thread.start()
 
-        # Plot titles
-        plot_titles = [
-            "Raw Data",
-            "Low-Pass Filtered Data (100 Hz Cutoff)",
-            "High-Pass Filtered Data (200 Hz Cutoff)",
-            "Band-Pass Filtered Data (50-200 Hz)",
-            "Bandpass Average Peak-to-Peak Over Frequency"
-        ]
-
-        # Create plot widgets for the selected channel
-        for i, title in enumerate(plot_titles):
-            plot_widget = pg.PlotWidget(title=title)
-            plot_widget.showGrid(x=True, y=True)
-            plot_widget.setLabel('bottom', 'Time (s)' if i < 4 else 'Frequency (Hz)')
-            plot_widget.setLabel('left', 'Amplitude' if i < 4 else 'Peak-to-Peak Value')
-            plot_widget.setFixedHeight(250)  # Set a fixed height for each plot
-            self.scroll_layout.addWidget(plot_widget)
-            self.plot_widgets.append(plot_widget)
-            plot = plot_widget.plot(pen='b')
-            plot.setData(np.array([0]), np.array([0]))  # Initialize empty plot
-            self.plots.append(plot)
-
-        self.scroll_layout.addStretch()  # Add stretch to keep plots at the top
-        self.plot_initialized = True
-        self.update_plots()
-
-    def get_widget(self):
-        return self.widget
-
-    def update_selected_channel(self, index):
-        """Update the selected channel and refresh plots."""
-        if index > 0:  # Skip "Select Channel" option
-            self.selected_channel_idx = index - 1
-            if self.console:
-                self.console.append_to_console(f"Selected channel for plots: {self.channel_names[self.selected_channel_idx]}")
-        else:
-            self.selected_channel_idx = 0
-            if self.console:
-                self.console.append_to_console("No valid channel selected for plots, defaulting to first channel.")
-        self.update_plots()
-
-    def initialize_async(self):
+    def complete_initialization(self, channel_names, num_channels, tag_name, channel_properties):
+        """Complete initialization on the main thread after worker finishes."""
         try:
-            database = self.mongo_client.get_database("changed_db")
-            projects_collection = database.get_collection("projects")
-            project = projects_collection.find_one({"project_name": self.project_name, "email": self.db.email})
-            if not project:
-                self.log_and_set_status(f"Project {self.project_name} not found for email {self.db.email}. Using default channel.")
-                self.channel_names = ["Channel 1"]
-                self.num_channels = 1
-                self.table.setRowCount(1)
-                self.channel_selector.clear()
-                self.channel_selector.addItem("Select Channel")
-                self.channel_selector.addItems(self.channel_names)
-                self.channel_selector.setCurrentIndex(1)
-                self.initialize_data_arrays()
-                self.update_table_defaults()
-                self.initialize_plots()
-                return
+            self.channel_names = channel_names
+            self.num_channels = num_channels
+            self.tag_name = tag_name
+            self.channel_properties = channel_properties
 
-            self.project_id = project["_id"]
-            model = next((m for m in project["models"] if m["name"] == self.model_name), None)
-            if not model or not model.get("channels"):
-                self.log_and_set_status(f"Model {self.model_name} or channels not found in project {self.project_name}. Using default channel.")
-                self.channel_names = ["Channel 1"]
-                self.num_channels = 1
-                self.table.setRowCount(1)
-                self.channel_selector.clear()
-                self.channel_selector.addItem("Select Channel")
-                self.channel_selector.addItems(self.channel_names)
-                self.channel_selector.setCurrentIndex(1)
-                self.initialize_data_arrays()
-                self.update_table_defaults()
-                self.initialize_plots()
-                return
-
-            self.channel_names = [c.get("channelName", f"Channel {i+1}") for i, c in enumerate(model["channels"])]
-            self.num_channels = len(self.channel_names)
-            if not self.channel_names:
-                self.log_and_set_status("No channels found in model. Using default channel.")
-                self.channel_names = ["Channel 1"]
-                self.num_channels = 1
-
-            # Update table and selector
             self.table.setRowCount(self.num_channels)
             self.channel_selector.clear()
             self.channel_selector.addItem("Select Channel")
@@ -1063,31 +1069,15 @@ class TabularViewFeature:
                 self.selected_channel_idx = 0
                 self.channel_selector.setCurrentIndex(1 if self.channel_names else 0)
 
-            # Initialize data arrays
             self.initialize_data_arrays()
-
-            # Populate channel properties
-            for channel in model["channels"]:
-                channel_name = channel.get("channelName", "Unknown")
-                correction_value = float(channel.get("CorrectionValue", "1.0")) if channel.get("CorrectionValue") else 1.0
-                gain = float(channel.get("Gain", "1.0")) if channel.get("Gain") else 1.0
-                sensitivity = float(channel.get("Sensitivity", "1.0")) if channel.get("Sensitivity") and float(channel.get("Sensitivity")) != 0 else 1.0
-                self.channel_properties[channel_name] = {
-                    "Unit": channel.get("Unit", "mil").lower(),
-                    "CorrectionValue": correction_value,
-                    "Gain": gain,
-                    "Sensitivity": sensitivity
-                }
-
-            self.tag_name = model.get("tagName", "")
-            if self.console:
-                self.console.append_to_console(f"Initialized with TagName: {self.tag_name}, Model: {self.model_name}, Channels: {self.channel_names}, Project ID: {self.project_id}")
-
             self.update_table_defaults()
             self.load_settings_from_database()
             self.initialize_plots()
+
+            if self.console:
+                self.console.append_to_console(f"Initialized with TagName: {self.tag_name}, Model: {self.model_name}, Channels: {self.channel_names}, Project ID: {self.project_id}")
         except Exception as ex:
-            self.log_and_set_status(f"Error initializing TabularView: {str(ex)}")
+            self.log_and_set_status(f"Error completing initialization: {str(ex)}")
             self.channel_names = ["Channel 1"]
             self.num_channels = 1
             self.table.setRowCount(1)
@@ -1098,6 +1088,52 @@ class TabularViewFeature:
             self.initialize_data_arrays()
             self.update_table_defaults()
             self.initialize_plots()
+
+    def initialize_plots(self):
+        """Initialize plot widgets for the selected channel."""
+        for widget in self.plot_widgets:
+            self.scroll_layout.removeWidget(widget)
+            widget.deleteLater()
+        self.plot_widgets = []
+        self.plots = []
+
+        plot_titles = [
+            "Raw Data",
+            "Low-Pass Filtered Data (100 Hz Cutoff)",
+            "High-Pass Filtered Data (200 Hz Cutoff)",
+            "Band-Pass Filtered Data (50-200 Hz)",
+            "Bandpass Average Peak-to-Peak Over Frequency"
+        ]
+
+        for i, title in enumerate(plot_titles):
+            plot_widget = pg.PlotWidget(title=title)
+            plot_widget.showGrid(x=True, y=True)
+            plot_widget.setLabel('bottom', 'Time (s)' if i < 4 else 'Frequency (Hz)')
+            plot_widget.setLabel('left', 'Amplitude' if i < 4 else 'Peak-to-Peak Value')
+            plot_widget.setFixedHeight(250)
+            self.scroll_layout.addWidget(plot_widget)
+            self.plot_widgets.append(plot_widget)
+            plot = plot_widget.plot(pen='b')
+            plot.setData(np.array([0]), np.array([0]))
+            self.plots.append(plot)
+
+        self.scroll_layout.addStretch()
+        self.plot_initialized = True
+        self.update_plots()
+
+    def get_widget(self):
+        return self.widget
+
+    def update_selected_channel(self, index):
+        if index > 0:
+            self.selected_channel_idx = index - 1
+            if self.console:
+                self.console.append_to_console(f"Selected channel for plots: {self.channel_names[self.selected_channel_idx]}")
+        else:
+            self.selected_channel_idx = 0
+            if self.console:
+                self.console.append_to_console("No valid channel selected for plots, defaulting to first channel.")
+        self.update_plots()
 
     def initialize_data_arrays(self):
         self.raw_data = [np.zeros(4096) for _ in range(self.num_channels)]
@@ -1142,7 +1178,7 @@ class TabularViewFeature:
 
     def load_settings_from_database(self):
         try:
-            database = self.mongo_client.get_database("changed_db")
+            database = MongoClient("mongodb://localhost:27017").get_database("changed_db")
             settings_collection = database.get_collection("TabularViewSettings")
             setting = settings_collection.find_one({"projectId": self.project_id}, sort=[("updatedAt", -1)])
             
@@ -1178,7 +1214,7 @@ class TabularViewFeature:
 
     def save_settings_to_database(self):
         try:
-            database = self.mongo_client.get_database("changed_db")
+            database = MongoClient("mongodb://localhost:27017").get_database("changed_db")
             settings_collection = database.get_collection("TabularViewSettings")
             setting = {
                 "projectId": self.project_id,
@@ -1258,12 +1294,10 @@ class TabularViewFeature:
             return metrics
 
         try:
-            # Basic calculations
             metrics["vpp"] = float(np.max(channel_data) - np.min(channel_data))
             metrics["vrms"] = float(np.sqrt(np.mean(np.square(channel_data))))
             metrics["direct"] = float(np.mean(channel_data))
 
-            # Trigger detection
             threshold = np.mean(tacho_trigger_data) + 0.5 * np.std(tacho_trigger_data)
             trigger_indices = np.where(np.diff((tacho_trigger_data > threshold).astype(int)) > 0)[0]
             min_distance = 5
@@ -1272,7 +1306,6 @@ class TabularViewFeature:
                 if trigger_indices[i] - filtered_trigger_indices[-1] >= min_distance:
                     filtered_trigger_indices.append(trigger_indices[i])
 
-            # RPM calculation
             if len(filtered_trigger_indices) >= 2:
                 samples_per_rotation = np.mean(np.diff(filtered_trigger_indices))
                 if samples_per_rotation > 0:
@@ -1281,10 +1314,8 @@ class TabularViewFeature:
                 if self.console:
                     self.console.append_to_console(f"Channel {channel_idx+1}: Insufficient trigger points for RPM.")
 
-            # Gap calculation
             metrics["gap"] = float(np.mean(tacho_trigger_data))
 
-            # Harmonic calculations
             if len(filtered_trigger_indices) >= 2:
                 start_idx = filtered_trigger_indices[0]
                 end_idx = filtered_trigger_indices[-1]
@@ -1310,7 +1341,6 @@ class TabularViewFeature:
                 if self.console:
                     self.console.append_to_console(f"Channel {channel_idx+1}: Insufficient triggers for harmonic calculations.")
 
-            # Twiddle factor
             if len(filtered_trigger_indices) >= 2:
                 fft_vals = np.fft.fft(channel_data[filtered_trigger_indices[0]:filtered_trigger_indices[-1]])
                 fft_phases = np.angle(fft_vals)
@@ -1357,7 +1387,6 @@ class TabularViewFeature:
             return
 
         try:
-            # Relaxed validation: accept any non-empty values
             if not values:
                 if self.console:
                     self.console.append_to_console("Empty data received, using zeros for all channels.")
@@ -1369,7 +1398,7 @@ class TabularViewFeature:
                 elif len(values[i]) < 4096:
                     values[i] = (values[i] + [0] * (4096 - len(values[i])))[:4096]
                 elif len(values[i]) > 4096:
-                    values[i] = values[i][:4096]
+                    values[i] = values[:4096]
 
             self.sample_rate = sample_rate if sample_rate > 0 else 4096
             self.data = values
@@ -1499,7 +1528,6 @@ class TabularViewFeature:
             self.table.setItem(row, col, QTableWidgetItem(data[header]))
 
     def update_plots(self):
-        """Update all plots for the selected channel."""
         if not self.plot_initialized:
             self.log_and_set_status("Plots not initialized, skipping update.")
             return
@@ -1540,7 +1568,6 @@ class TabularViewFeature:
             if self.console:
                 self.console.append_to_console(f"Updated plot {i+1} for channel {channel_name}: {len(trimmed_data)} samples")
 
-        # Update peak-to-peak plot
         self.plots[4].clear()
         frequency_values = [self.average_frequency[ch] + (i * 0.1) for i in range(len(self.band_pass_peak_to_peak_history[ch]))]
         if frequency_values and self.band_pass_peak_to_peak_history[ch]:
@@ -1560,4 +1587,10 @@ class TabularViewFeature:
             self.console.append_to_console(message)
 
     def close(self):
-        self.mongo_client.close()
+        if hasattr(self, 'thread') and self.thread.isRunning():
+            self.thread.quit()
+            self.thread.wait()
+        try:
+            MongoClient("mongodb://localhost:27017").close()
+        except Exception as ex:
+            self.log_and_set_status(f"Error closing MongoDB client: {str(ex)}")
