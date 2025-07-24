@@ -2,16 +2,17 @@ from PyQt5.QtWidgets import (
     QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QLineEdit,
     QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
 )
-from PyQt5.QtCore import QSize, Qt
+from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QIcon
 import logging
 import re
+
 
 class LayoutSelectionDialog(QDialog):
     def __init__(self, parent=None, current_layout=None):
         super().__init__(parent)
         self.setWindowTitle("Select Layout")
-        self.setFixedSize(300, 300)
+        self.setFixedSize(400, 400)
         self.setWindowFlags(Qt.Popup)
 
         self.selected_layout = current_layout
@@ -24,7 +25,7 @@ class LayoutSelectionDialog(QDialog):
             QLabel {
                 font-size: 16px;
                 font-weight: bold;
-                color: black;
+                color: #333;
                 margin-bottom: 10px;
             }
         """)
@@ -46,7 +47,9 @@ class LayoutSelectionDialog(QDialog):
             btn.setToolTip(layout_name)
             self.layout_buttons[layout_name] = btn
 
+            # btn.clicked.connect(lambda _, l=layout_name): self.select_layout(l))
             btn.clicked.connect(lambda _, l=layout_name: self.select_layout(l))
+
 
             grid.addWidget(btn, row, col)
             col += 1
@@ -56,8 +59,6 @@ class LayoutSelectionDialog(QDialog):
 
         layout.addLayout(grid)
         self.setLayout(layout)
-
-        self.update_button_styles()
 
     def update_button_styles(self):
         for layout_name, btn in self.layout_buttons.items():
@@ -77,6 +78,10 @@ class SubToolBar(QWidget):
         self.parent = parent
         self.selected_layout = "2x2"  # Default layout
         self.filename_edit = None
+        self.saving_indicator = None
+        self.blink_timer = QTimer(self)
+        self.blink_timer.timeout.connect(self.toggle_saving_indicator)
+        self.blink_state = False
         self.initUI()
         # Connect signal with error handling
         try:
@@ -96,6 +101,20 @@ class SubToolBar(QWidget):
         self.toolbar.setFixedHeight(100)
         layout.addWidget(self.toolbar)
         self.update_subtoolbar()
+
+    def toggle_saving_indicator(self):
+        if self.saving_indicator:
+            self.blink_state = not self.blink_state
+            text = "🔴" if self.blink_state else "⚪"
+            self.saving_indicator.setText(text)
+
+    def start_blinking(self):
+        self.blink_timer.start(500)  # 500ms interval
+
+    def stop_blinking(self):
+        self.blink_timer.stop()
+        if self.saving_indicator:
+            self.saving_indicator.setText("")
 
     def update_subtoolbar(self):
         logging.debug(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")
@@ -145,6 +164,16 @@ class SubToolBar(QWidget):
         self.filename_edit.setEnabled(True)  # Always enabled to show filename
         self.refresh_filename()
         self.toolbar.addWidget(self.filename_edit)
+
+        # Add saving indicator
+        self.saving_indicator = QLabel("")
+        self.saving_indicator.setStyleSheet("font-size: 20px; padding: 0px 8px;")
+        self.toolbar.addWidget(self.saving_indicator)
+        if self.parent.is_saving:
+            self.start_blinking()
+        else:
+            self.stop_blinking()
+
         self.toolbar.addSeparator()
 
         def add_action(text_icon, color, callback, tooltip, enabled, background_color):
@@ -179,8 +208,18 @@ class SubToolBar(QWidget):
                 logging.debug(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")
 
         # Enable save/stop actions based on is_saving state
-        add_action("▶", "#ffffff", self.parent.start_saving, "Start Saving Data", not self.parent.is_saving, "#43a047")
-        add_action("⏸", "#ffffff", self.parent.stop_saving, "Stop Saving Data", self.parent.is_saving, "#90a4ae")
+        def start_saving_wrapper():
+            self.parent.start_saving()
+            self.start_blinking()
+            self.update_subtoolbar()
+
+        def stop_saving_wrapper():
+            self.parent.stop_saving()
+            self.stop_blinking()
+            self.update_subtoolbar()
+
+        add_action("▶", "#ffffff", start_saving_wrapper, "Start Saving Data", not self.parent.is_saving, "#43a047")
+        add_action("⏸", "#ffffff", stop_saving_wrapper, "Stop Saving Data", self.parent.is_saving, "#90a4ae")
         self.toolbar.addSeparator()
 
         connect_enabled = not self.parent.mqtt_connected
