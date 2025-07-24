@@ -1,7 +1,7 @@
 import sys
 import gc
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QSplitter, QSizePolicy, QApplication, QMessageBox, QInputDialog
-from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QThread, QObject
 from PyQt5.QtGui import QIcon, QColor
 import logging
 from dashboard.components.file_bar import FileBar
@@ -28,9 +28,33 @@ from features.report import ReportFeature
 from select_project import SelectProjectWidget
 from create_project import CreateProjectWidget
 from project_structure import ProjectStructureWidget
+import time
+
+class Worker(QObject):
+    """Worker class to handle deferred initialization in a separate thread."""
+    finished = pyqtSignal()
+    select_project = pyqtSignal()
+
+    def __init__(self, dashboard):
+        super().__init__()
+        self.dashboard = dashboard
+
+    def run(self):
+        """Perform deferred initialization tasks."""
+        try:
+            projects = self.dashboard.db.load_projects()
+            if projects and self.dashboard.current_project:
+                self.dashboard.load_project(self.dashboard.current_project)
+            else:
+                self.select_project.emit()
+        except Exception as e:
+            logging.error(f"Error in deferred initialization: {str(e)}")
+            self.dashboard.console.append_to_console(f"Error in deferred initialization: {str(e)}")
+        finally:
+            self.finished.emit()
 
 class DashboardWindow(QWidget):
-    mqtt_status_changed = pyqtSignal(bool)  # Signal for MQTT connection status changes
+    mqtt_status_changed = pyqtSignal(bool)
 
     def __init__(self, db, email, auth_window=None):
         super().__init__()
@@ -50,9 +74,8 @@ class DashboardWindow(QWidget):
         self.select_project_widget = None
         self.create_project_widget = None
         self.project_structure_widget = None
-
         self.initUI()
-        QTimer.singleShot(0, self.deferred_initialization)
+        self.deferred_initialization()
 
     def initUI(self):
         self.setWindowTitle('Sarayu Desktop Application')
@@ -176,11 +199,16 @@ class DashboardWindow(QWidget):
         main_layout.addWidget(self.console_container)
 
     def deferred_initialization(self):
-        projects = self.db.load_projects()
-        if projects and self.current_project:
-            self.load_project(self.current_project)
-        else:
-            self.display_select_project()
+        """Start deferred initialization in a separate QThread."""
+        self.worker = Worker(self)
+        self.thread = QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        self.worker.select_project.connect(self.display_select_project)
+        self.thread.start()
 
     def display_select_project(self):
         self.clear_content_layout()
@@ -227,7 +255,7 @@ class DashboardWindow(QWidget):
             self.project_structure_widget = None
             logging.debug("ProjectStructureWidget removed from MainSection")
         self.load_project_features()
-        QTimer.singleShot(0, self.setup_mqtt)  # Setup MQTT asynchronously
+        QTimer.singleShot(0, self.setup_mqtt)
 
     def setup_mqtt(self):
         if not self.current_project:
@@ -296,7 +324,7 @@ class DashboardWindow(QWidget):
         if self.mqtt_connected:
             self.console.append_to_console("Already connected to MQTT")
             return
-        QTimer.singleShot(0, self.setup_mqtt)  # Connect asynchronously
+        QTimer.singleShot(0, self.setup_mqtt)
 
     def disconnect_mqtt(self):
         if not self.mqtt_connected:
@@ -315,20 +343,33 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
             self.mqtt_status.update_mqtt_status_indicator()
 
-    def on_data_received(self, tag_name, model_name, values, sample_rate):
-        for (feature_name, instance_model, instance_channel), feature_instance in self.feature_instances.items():
-            if instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
-                try:
-                    feature_instance.on_data_received(tag_name, model_name, values, sample_rate)
-                except Exception as e:
-                    logging.error(f"Error in on_data_received for {feature_name}: {str(e)}")
+    def on_data_received(self, feature_name, tag_name, model_name, values, sample_rate):
+        try:
+            # Update only the relevant feature instances
+            for key, feature_instance in self.feature_instances.items():
+                instance_feature, instance_model, instance_channel, _ = key
+                if instance_feature == feature_name and instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
+                    QTimer.singleShot(0, lambda: self._update_feature(
+                        instance_feature, instance_model, instance_channel, 
+                        feature_instance, tag_name, values, sample_rate
+                    ))
+        except Exception as e:
+            logging.error(f"Error in on_data_received for {feature_name}: {str(e)}")
+            self.console.append_to_console(f"Error processing data for {feature_name}: {str(e)}")
+
+    def _update_feature(self, feature_name, model_name, channel, feature_instance, tag_name, values, sample_rate):
+        try:
+            feature_instance.on_data_received(tag_name, model_name, values, sample_rate)
+            logging.debug(f"Updated feature {feature_name}/{model_name}/{channel or 'No Channel'}")
+        except Exception as e:
+            logging.error(f"Error updating feature {feature_name}/{model_name}/{channel or 'No Channel'}: {str(e)}")
 
     def on_mqtt_status(self, message):
         self.mqtt_connected = "Connected" in message
         self.mqtt_status_changed.emit(self.mqtt_connected)
         self.console.append_to_console(f"MQTT Status: {message}")
-        self.mqtt_status.update_mqtt_status_indicator()
         self.sub_tool_bar.update_subtoolbar()
+        self.mqtt_status.update_mqtt_status_indicator()
 
     def load_project_features(self):
         try:
@@ -380,7 +421,7 @@ class DashboardWindow(QWidget):
                 self.current_project = new_project_name
                 self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
                 self.load_project_features()
-                QTimer.singleShot(0, self.setup_mqtt)  # Setup MQTT asynchronously
+                QTimer.singleShot(0, self.setup_mqtt)
                 self.tool_bar.update_toolbar()
                 self.sub_tool_bar.update_subtoolbar()
                 if self.current_feature:
@@ -425,11 +466,13 @@ class DashboardWindow(QWidget):
         if not selected_model:
             QMessageBox.warning(self, "Error", "Please select a model to save data!")
             return
-        key = ("Time View", selected_model, None)
-        feature_instance = self.feature_instances.get(key)
-        if not feature_instance:
+        # Find the most recent Time View instance for the selected model
+        time_view_keys = [k for k in self.feature_instances.keys() if k[0] == "Time View" and k[1] == selected_model]
+        if not time_view_keys:
             QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
             return
+        key = max(time_view_keys, key=lambda k: k[3])  # Use the most recent instance based on unique_id
+        feature_instance = self.feature_instances.get(key)
         try:
             feature_instance.start_saving()
             self.is_saving = True
@@ -448,11 +491,13 @@ class DashboardWindow(QWidget):
         if not selected_model:
             QMessageBox.warning(self, "Error", "Please select a model to stop saving!")
             return
-        key = ("Time View", selected_model, None)
-        feature_instance = self.feature_instances.get(key)
-        if not feature_instance:
+        # Find the most recent Time View instance for the selected model
+        time_view_keys = [k for k in self.feature_instances.keys() if k[0] == "Time View" and k[1] == selected_model]
+        if not time_view_keys:
             QMessageBox.warning(self, "Error", "Time View feature not initialized for the selected model!")
             return
+        key = max(time_view_keys, key=lambda k: k[3])  # Use the most recent instance based on unique_id
+        feature_instance = self.feature_instances.get(key)
         try:
             feature_instance.stop_saving()
             self.is_saving = False
@@ -474,52 +519,32 @@ class DashboardWindow(QWidget):
 
             current_console_height = self.console.console_message_area.height()
 
-            selected_channel = self.tree_view.get_selected_channel()
             selected_model = self.tree_view.get_selected_model()
+            if not selected_model:
+                self.console.append_to_console(f"Please select a model to view {feature_name}.")
+                logging.warning(f"No model selected for {feature_name}")
+                return
 
-            if feature_name in ["Time View", "Time Report"]:
-                if not selected_model:
-                    self.console.append_to_console(f"Please select a model to view {feature_name}.")
-                    logging.warning(f"No model selected for {feature_name}")
-                    return
-                key = (feature_name, selected_model, None)
-            else:
-                if not selected_channel:
-                    self.console.append_to_console(f"Please select a channel to view {feature_name}.")
-                    logging.warning(f"No channel selected for {feature_name}")
-                    return
-                if not selected_model:
-                    self.console.append_to_console(f"Please select a model to view {feature_name}.")
-                    logging.warning(f"No model selected for {feature_name}")
-                    return
-                key = (feature_name, selected_model, selected_channel)
+            project_data = self.db.get_project_data(project_name)
+            if not project_data:
+                self.console.append_to_console(f"Project {project_name} not found in database.")
+                logging.error(f"Project {project_name} not found!")
+                return
 
-            # Check for existing subwindow
-            feature_instance = self.feature_instances.get(key)
-            sub_window = self.sub_windows.get(key)
-            if feature_instance and sub_window:
-                try:
-                    if sub_window.isHidden():
-                        sub_window.show()
-                        logging.debug(f"Showing existing subwindow for {key}, ID: {id(sub_window)}")
-                    if sub_window.isMaximized():
-                        sub_window.showMaximized()
-                    else:
-                        sub_window.showNormal()
-                    sub_window.raise_()
-                    sub_window.activateWindow()
-                    self.main_section.arrange_layout()
-                    self.console.console_message_area.setFixedHeight(current_console_height)
-                    logging.debug(f"Reused existing subwindow for {key}")
-                    return
-                except RuntimeError:
-                    logging.warning(f"Subwindow for {key} is invalid, cleaning up")
-                    del self.feature_instances[key]
-                    del self.sub_windows[key]
-                    feature_instance = None
-                    sub_window = None
+            model = next((m for m in project_data["models"] if m["name"] == selected_model), None)
+            if not model:
+                self.console.append_to_console(f"Model {selected_model} not found in project {project_name}.")
+                logging.error(f"Model {selected_model} not found in project {project_name}!")
+                return
 
-            # Create new feature instance and subwindow
+            selected_channel = self.tree_view.get_selected_channel() if feature_name not in ["Time View", "Time Report"] else None
+            channels = [selected_channel] if selected_channel and feature_name not in ["Time View", "Time Report"] else [None]
+
+            if not channels or (not selected_channel and feature_name not in ["Time View", "Time Report"]):
+                self.console.append_to_console(f"Please select a channel for {feature_name} in model {selected_model}.")
+                logging.warning(f"No channel selected for {feature_name} in model {selected_model}")
+                return
+
             feature_classes = {
                 "Tabular View": TabularViewFeature,
                 "Time View": TimeViewFeature,
@@ -536,12 +561,21 @@ class DashboardWindow(QWidget):
                 "Report": ReportFeature
             }
 
-            if feature_name in feature_classes:
+            if feature_name not in feature_classes:
+                logging.warning(f"Unknown feature: {feature_name}")
+                QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
+                return
+
+            for channel in channels:
+                unique_id = int(time.time() * 1000)
+                key = (feature_name, selected_model, channel, unique_id)
+
+                # Create new feature instance and subwindow
                 try:
                     if not self.db.is_connected():
                         self.db.reconnect()
                     feature_instance = feature_classes[feature_name](
-                        self, self.db, project_name, channel=selected_channel, 
+                        self, self.db, project_name, channel=channel, 
                         model_name=selected_model, console=self.console
                     )
                     self.feature_instances[key] = feature_instance
@@ -550,35 +584,39 @@ class DashboardWindow(QWidget):
                         sub_window = self.main_section.add_subwindow(
                             widget,
                             feature_name,
-                            channel_name=selected_channel,
+                            channel_name=channel,
                             model_name=selected_model
                         )
                         if sub_window:
                             self.sub_windows[key] = sub_window
-                            sub_window.closeEvent = lambda event: self.on_subwindow_closed(event, key)
+                            sub_window.closeEvent = lambda event, k=key: self.on_subwindow_closed(event, k)
                             sub_window.show()
-                            self.main_section.arrange_layout()
                             logging.debug(f"Created new subwindow for {key}, ID: {id(sub_window)}")
                         else:
-                            logging.error(f"Failed to create subwindow for {feature_name}")
+                            logging.error(f"Failed to create subwindow for {feature_name}/{selected_model}/{channel or 'No Channel'}")
                             QMessageBox.warning(self, "Error", f"Failed to create subwindow for {feature_name}")
+                            del self.feature_instances[key]
                     else:
                         logging.error(f"Feature {feature_name} returned invalid widget")
                         QMessageBox.warning(self, "Error", f"Feature {feature_name} failed to initialize")
+                        del self.feature_instances[key]
                     self.console.console_message_area.setFixedHeight(current_console_height)
                 except Exception as e:
-                    logging.error(f"Failed to load feature {feature_name}: {str(e)}")
+                    logging.error(f"Failed to load feature {feature_name} for channel {channel or 'No Channel'}: {str(e)}")
                     QMessageBox.warning(self, "Error", f"Failed to load {feature_name}: {str(e)}")
-            else:
-                logging.warning(f"Unknown feature: {feature_name}")
-                QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
+                    if key in self.feature_instances:
+                        del self.feature_instances[key]
+
+            self.main_section.arrange_layout()
+            self.console.console_message_area.setFixedHeight(current_console_height)
+
         except Exception as e:
             logging.error(f"Error displaying feature content: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error displaying feature: {str(e)}")
 
     def on_subwindow_closed(self, event, key):
         try:
-            feature_name, model_name, channel_name = key
+            feature_name, model_name, channel_name, unique_id = key
             logging.debug(f"Closing subwindow for key: {key}, ID: {id(self.sub_windows.get(key))}")
 
             sub_window = self.sub_windows.get(key)
@@ -620,7 +658,7 @@ class DashboardWindow(QWidget):
             del self.sub_windows[key]
 
             if self.current_feature == feature_name:
-                if not any(k[0] == feature_name for k in self.feature_instances.keys()):
+                if not any(k[0] == feature_name for k in self.feature_instances.keys()): 
                     self.current_feature = None
                     self.is_saving = False
                     self.sub_tool_bar.update_subtoolbar()
@@ -672,7 +710,6 @@ class DashboardWindow(QWidget):
             return
         self.current_feature = None
         self.is_saving = False
-        self.timer.stop()
         self.sub_tool_bar.update_subtoolbar()
         self.file_bar.update_file_bar()
 
@@ -741,6 +778,9 @@ class DashboardWindow(QWidget):
                 self.timer.stop()
             self.cleanup_mqtt()
             self.clear_content_layout()
+            if hasattr(self, 'thread') and self.thread.isRunning():
+                self.thread.quit()
+                self.thread.wait()
             if self.db and self.db.is_connected():
                 self.db.close_connection()
             app = QApplication.instance()

@@ -68,6 +68,7 @@ class TimeViewFeature:
         self.settings_button = None
         self.refresh_timer = None
         self.needs_refresh = []  # Flag for plot updates
+        self.is_initialized = False  # Track initialization state
         self.initUI()
 
     def initUI(self):
@@ -117,20 +118,21 @@ class TimeViewFeature:
         main_layout.addWidget(self.scroll_area)
         self.widget.setLayout(main_layout)
 
-        # Initialize refresh timer
+        # Initialize refresh timer but don't start it yet
         self.refresh_timer = QTimer()
         self.refresh_timer.timeout.connect(self.refresh_plots)
-        self.refresh_timer.start(100)  # Refresh every 100ms
 
         if not self.model_name and self.console:
             self.console.append_to_console("No model selected in TimeViewFeature.")
         if not self.channel and self.console:
             self.console.append_to_console("No channel selected in TimeViewFeature.")
+        logging.debug("UI initialized, waiting for data to start refresh timer")
 
     def initialize_plots(self):
         """Initialize plots based on dynamically received channel counts."""
         if not self.main_channels or not self.tacho_channels_count or not self.total_channels:
             logging.error("Cannot initialize plots: channel counts not set")
+            self.log_and_set_status("Cannot initialize plots: channel counts not set")
             return
 
         # Clear existing plots
@@ -197,6 +199,7 @@ class TimeViewFeature:
         """Initialize FIFO buffers for each channel."""
         if not self.sample_rate or not self.num_plots or not self.samples_per_channel:
             logging.error("Cannot initialize buffers: sample_rate, num_plots, or samples_per_channel not set")
+            self.log_and_set_status("Buffer initialization failed: Missing sample_rate, num_plots, or samples_per_channel")
             return
         self.fifo_window_samples = self.sample_rate * self.window_seconds
         for i in range(self.num_plots):
@@ -204,6 +207,11 @@ class TimeViewFeature:
             time_step = self.window_seconds / self.fifo_window_samples
             self.fifo_times[i] = np.array([i * time_step for i in range(self.fifo_window_samples)])
         logging.debug(f"Initialized FIFO buffers: {self.num_plots} channels, {self.fifo_window_samples} samples each")
+        self.is_initialized = True  # Mark initialization as complete
+        # Start the refresh timer if not already running
+        if not self.refresh_timer.isActive():
+            self.refresh_timer.start(100)
+            logging.debug("Started refresh timer after buffer initialization")
 
     def load_project_data(self):
         """Load project data to initialize model information."""
@@ -252,8 +260,9 @@ class TimeViewFeature:
 
     def update_window_size(self):
         """Update FIFO buffer sizes when window_seconds changes."""
-        if not self.sample_rate:
-            logging.error("Cannot update window size: sample_rate not set")
+        if not self.sample_rate or not self.num_plots:
+            logging.error("Cannot update window size: sample_rate or num_plots not set")
+            self.log_and_set_status("Cannot update window size: Missing sample_rate or num_plots")
             return
         new_fifo_window_samples = self.sample_rate * self.window_seconds
         for i in range(self.num_plots):
@@ -333,15 +342,20 @@ class TimeViewFeature:
             logging.debug(f"Ignoring data for model {model_name}, expected {self.model_name}")
             return
         try:
+            # Validate input data
+            if not values or not sample_rate or sample_rate <= 0:
+                self.log_and_set_status(f"Invalid MQTT data: values={values}, sample_rate={sample_rate}")
+                return
+
             # Dynamically set channel counts from MQTT data
-            self.main_channels = len(values) - 2 if len(values) >= 2 else 0  # header[2] equivalent
-            self.tacho_channels_count = 2  # header[6] equivalent, assuming 2 tacho channels
+            self.main_channels = len(values) - 2 if len(values) >= 2 else 0
+            self.tacho_channels_count = 2  # Assuming 2 tacho channels
             self.total_channels = self.main_channels + self.tacho_channels_count
             self.num_plots = self.total_channels
             self.sample_rate = sample_rate
             self.samples_per_channel = len(values[0]) if values else 0
 
-            if not self.main_channels or not values or len(values) < self.tacho_channels_count:
+            if not self.main_channels or len(values) < self.tacho_channels_count:
                 self.log_and_set_status(f"Received incorrect number of sublists: {len(values) if values else 0}, expected at least {self.tacho_channels_count}")
                 return
 
@@ -356,10 +370,7 @@ class TimeViewFeature:
                 return
 
             # Initialize plots and buffers if not already done or if channel counts changed
-            if not self.fifo_data or len(self.fifo_data) != self.num_plots:
-                self.fifo_data = [[] for _ in range(self.num_plots)]
-                self.fifo_times = [[] for _ in range(self.num_plots)]
-                self.needs_refresh = [True] * self.num_plots
+            if not self.fifo_data or len(self.fifo_data) != self.num_plots or not self.is_initialized:
                 self.initialize_plots()
 
             # Update FIFO buffers
@@ -424,44 +435,59 @@ class TimeViewFeature:
     def refresh_plots(self):
         """Refresh plots if needed."""
         try:
+            # Check if initialization is complete
+            if not self.is_initialized or self.fifo_window_samples is None or not self.plot_widgets or \
+               not self.plots or not self.fifo_data or not self.fifo_times:
+                logging.warning("Skipping plot refresh: Plots or buffers not initialized")
+                self.log_and_set_status("Cannot refresh plots: Initialization incomplete")
+                return
+
             for ch in range(self.num_plots):
-                if self.needs_refresh[ch]:
-                    times = self.fifo_times[ch]
-                    data = self.fifo_data[ch]
-                    if len(data) > 0 and len(times) > 0:
-                        self.plots[ch].setData(times, data)
-                        self.plot_widgets[ch].setXRange(times[-self.fifo_window_samples], times[-1], padding=0)
-                        if ch < self.main_channels:
-                            self.plot_widgets[ch].enableAutoRange(axis='y')
-                        elif ch == self.main_channels:
-                            self.plot_widgets[ch].enableAutoRange(axis='y')
-                        else:
-                            self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
-                    else:
-                        self.log_and_set_status(f"No data for plot {ch}, data_len={len(data)}, times_len={len(times)}")
+                if not self.needs_refresh[ch]:
+                    continue
 
-                    # Update trigger lines for the last tacho channel
-                    if ch == self.num_plots - 1:
-                        if self.trigger_lines:
-                            for line in self.trigger_lines:
-                                if line:
-                                    self.plot_widgets[ch].removeItem(line)
-                            self.trigger_lines = []
+                times = self.fifo_times[ch]
+                data = self.fifo_data[ch]
+                if len(data) == 0 or len(times) == 0:
+                    self.log_and_set_status(f"No data for plot {ch}, data_len={len(data)}, times_len={len(times)}")
+                    continue
 
-                        trigger_indices = np.where(self.fifo_data[ch][-self.fifo_window_samples:] == 1)[0]
-                        logging.debug(f"Tacho trigger indices (value=1): {len(trigger_indices)} points")
-                        for idx in trigger_indices:
-                            if idx < len(times):
-                                line = InfiniteLine(
-                                    pos=times[idx],
-                                    angle=90,
-                                    movable=False,
-                                    pen=mkPen('k', width=2, style=Qt.SolidLine)
-                                )
-                                self.plot_widgets[ch].addItem(line)
-                                self.trigger_lines.append(line)
+                # Ensure times array is long enough
+                if len(times) < self.fifo_window_samples:
+                    self.log_and_set_status(f"Insufficient time data for plot {ch}: {len(times)} < {self.fifo_window_samples}")
+                    continue
 
-                    self.needs_refresh[ch] = False
+                self.plots[ch].setData(times, data)
+                self.plot_widgets[ch].setXRange(times[-self.fifo_window_samples], times[-1], padding=0)
+                if ch < self.main_channels:
+                    self.plot_widgets[ch].enableAutoRange(axis='y')
+                elif ch == self.main_channels:
+                    self.plot_widgets[ch].enableAutoRange(axis='y')
+                else:
+                    self.plot_widgets[ch].setYRange(-0.5, 1.5, padding=0)
+
+                # Update trigger lines for the last tacho channel
+                if ch == self.num_plots - 1:
+                    if self.trigger_lines:
+                        for line in self.trigger_lines:
+                            if line:
+                                self.plot_widgets[ch].removeItem(line)
+                        self.trigger_lines = []
+
+                    trigger_indices = np.where(self.fifo_data[ch][-self.fifo_window_samples:] == 1)[0]
+                    logging.debug(f"Tacho trigger indices (value=1): {len(trigger_indices)} points")
+                    for idx in trigger_indices:
+                        if idx < len(times):
+                            line = InfiniteLine(
+                                pos=times[idx],
+                                angle=90,
+                                movable=False,
+                                pen=mkPen('k', width=2, style=Qt.SolidLine)
+                            )
+                            self.plot_widgets[ch].addItem(line)
+                            self.trigger_lines.append(line)
+
+                self.needs_refresh[ch] = False
 
             if any(self.needs_refresh):
                 logging.debug(f"Refreshed plots: {self.fifo_window_samples} samples, window={self.window_seconds}s")
