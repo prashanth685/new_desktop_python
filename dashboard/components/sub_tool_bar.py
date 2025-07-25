@@ -105,7 +105,7 @@ class SubToolBar(QWidget):
     def toggle_saving_indicator(self):
         if self.saving_indicator:
             self.blink_state = not self.blink_state
-            text = "🔴" if self.blink_state else "⚪"
+            text = "rec 🔴" if self.blink_state else "rec ⚪"
             self.saving_indicator.setText(text)
 
     def start_blinking(self):
@@ -219,7 +219,7 @@ class SubToolBar(QWidget):
             self.update_subtoolbar()
 
         add_action("▶", "#ffffff", start_saving_wrapper, "Start Saving Data", not self.parent.is_saving, "#43a047")
-        add_action("⏸", "#ffffff", stop_saving_wrapper, "Stop Saving Data", self.parent.is_saving, "#90a4ae")
+        add_action("⏸", "#ffffff", stop_saving_wrapper, "Stop Saving Data", self.parent.is_saving, "#d8291d")
         self.toolbar.addSeparator()
 
         connect_enabled = not self.parent.mqtt_connected
