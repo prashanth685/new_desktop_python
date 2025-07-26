@@ -1,6 +1,6 @@
 from pymongo import MongoClient, ASCENDING
-import datetime
 from bson.objectid import ObjectId
+import datetime
 import logging
 import re
 
@@ -86,12 +86,11 @@ class Database:
             logging.error(f"Error loading projects: {str(e)}")
             return []
 
-    def create_project(self, project_name, models):
+    def create_project(self, project_name, models, channel_count):
         if not project_name:
             return False, "Project name cannot be empty!"
         if self.projects_collection.find_one({"project_name": project_name, "email": self.email}):
             return False, "Project already exists!"
-
         if not isinstance(models, list):
             logging.error(f"Models must be a list, received: {type(models)}")
             return False, f"Models must be a list, received: {type(models)}"
@@ -104,37 +103,74 @@ class Database:
                 if not isinstance(channel, dict) or "channelName" not in channel:
                     logging.error(f"Each channel must be a dictionary with a 'channelName' field, received: {channel}")
                     return False, f"Each channel must be a dictionary with a 'channelName' field, received: {channel}"
+                # Set defaults for required fields
+                required_channel_fields = {
+                    "type": "Displacement",
+                    "sensitivity": "1.0",
+                    "unit": "mil",
+                    "correctionValue": "",
+                    "gain": "",
+                    "unitType": "",
+                    "angle": "",
+                    "angleDirection": "Right",
+                    "shaft": ""
+                }
+                for field, default in required_channel_fields.items():
+                    if field not in channel or channel[field] is None:
+                        channel[field] = default
+                self._calculate_channel_properties(channel)
 
         project_data = {
             "_id": ObjectId(),
             "project_name": project_name,
             "email": self.email,
             "createdAt": datetime.datetime.now().isoformat(),
-            "models": models
+            "models": models,
+            "channel_count": channel_count
         }
+
         try:
             result = self.projects_collection.insert_one(project_data)
             logging.info(f"Inserted project {project_name} with ID: {result.inserted_id}")
             if project_name not in self.projects:
                 self.projects.append(project_name)
             logging.info(f"Project {project_name} created with {len(models)} models")
-            return True, f"Project {project_name} created successfully!"
+            return True, f"Project '{project_name}' created successfully!"
         except Exception as e:
             logging.error(f"Failed to create project: {str(e)}")
             return False, f"Failed to create project: {str(e)}"
 
-    def edit_project(self, old_project_name, new_project_name, models=None):
-        if new_project_name == old_project_name and models is None:
-            return True, "No change made"
+    def _calculate_channel_properties(self, channel):
+        """Auto-calculate fields based on user changes (e.g., unit conversion)."""
+        unit = channel.get("unit", "mil")
+        if unit is None:
+            unit = "mil"  # Default to 'mil' if unit is None
+        unit = unit.lower().strip() if isinstance(unit, str) else "mil"
+        sensitivity = float(channel.get("sensitivity", "1.0") or "1.0")  # Handle None or empty string
+        if unit == "mm":
+            channel["ConvertedSensitivity"] = sensitivity / 25.4  # mil to mm
+        elif unit == "um":
+            channel["ConvertedSensitivity"] = sensitivity * 1000  # mil to um
+        else:
+            channel["ConvertedSensitivity"] = sensitivity
+        logging.debug(f"Calculated ConvertedSensitivity for {channel['channelName']}: {channel['ConvertedSensitivity']}")
+
+    def edit_project(self, old_project_name, new_project_name, updated_models=None, channel_count=None):
+        if not old_project_name or not new_project_name:
+            return False, "Project names cannot be empty!"
+        if new_project_name == old_project_name and updated_models is None and channel_count is None:
+            return True, "No changes made"
         if new_project_name != old_project_name and self.projects_collection.find_one({"project_name": new_project_name, "email": self.email}):
-            return False, "Project already exists!"
+            return False, f"Project '{new_project_name}' already exists!"
 
         update_data = {"project_name": new_project_name}
-        if models is not None:
-            if not isinstance(models, list):
-                logging.error(f"Models must be a list, received: {type(models)}")
-                return False, f"Models must be a list, received: {type(models)}"
-            for model in models:
+        if channel_count is not None:
+            update_data["channel_count"] = channel_count
+        if updated_models is not None:
+            if not isinstance(updated_models, list):
+                logging.error(f"Models must be a list, received: {type(updated_models)}")
+                return False, f"Models must be a list, received: {type(updated_models)}"
+            for model in updated_models:
                 if not isinstance(model, dict) or "name" not in model or "channels" not in model:
                     logging.error(f"Each model must be a dictionary with 'name' and 'channels' fields, received: {model}")
                     return False, f"Each model must be a dictionary with 'name' and 'channels' fields, received: {model}"
@@ -142,7 +178,23 @@ class Database:
                     if not isinstance(channel, dict) or "channelName" not in channel:
                         logging.error(f"Each channel must be a dictionary with a 'channelName' field, received: {channel}")
                         return False, f"Each channel must be a dictionary with a 'channelName' field, received: {channel}"
-            update_data["models"] = models
+                    required_channel_fields = {
+                        "type": "Displacement",
+                        "sensitivity": "1.0",
+                        "unit": "mil",
+                        "correctionValue": "",
+                        "gain": "",
+                        "unitType": "",
+                        "angle": "",
+                        "angleDirection": "Right",
+                        "shaft": ""
+                    }
+                    for field, default in required_channel_fields.items():
+                        if field not in channel or channel[field] is None:
+                            channel[field] = default
+                    self._calculate_channel_properties(channel)
+            update_data["models"] = updated_models
+            logging.debug(f"Updating project with new models: {len(updated_models)} models")
 
         try:
             result = self.projects_collection.update_one(
@@ -150,21 +202,49 @@ class Database:
                 {"$set": update_data}
             )
             logging.info(f"Updated project: matched {result.matched_count}, modified {result.modified_count}")
-            if old_project_name in self.projects:
-                self.projects[self.projects.index(old_project_name)] = new_project_name
-            self.messages_collection.update_many(
-                {"project_name": old_project_name, "email": self.email},
-                {"$set": {"project_name": new_project_name}}
-            )
-            self.timeview_collection.update_many(
-                {"project_name": old_project_name, "email": self.email},
-                {"$set": {"project_name": new_project_name}}
-            )
-            logging.info(f"Project renamed from {old_project_name} to {new_project_name}")
-            return True, f"Project renamed to {new_project_name} successfully!"
+            if result.matched_count == 0:
+                return False, f"No project found with name '{old_project_name}'"
+            if old_project_name != new_project_name:
+                self.messages_collection.update_many(
+                    {"project_name": old_project_name, "email": self.email},
+                    {"$set": {"project_name": new_project_name}}
+                )
+                self.timeview_collection.update_many(
+                    {"project_name": old_project_name, "email": self.email},
+                    {"$set": {"project_name": new_project_name}}
+                )
+                if old_project_name in self.projects:
+                    self.projects[self.projects.index(old_project_name)] = new_project_name
+                logging.info(f"Project renamed from '{old_project_name}' to '{new_project_name}'")
+            return True, f"Project updated to '{new_project_name}' successfully!"
         except Exception as e:
             logging.error(f"Failed to edit project: {str(e)}")
             return False, f"Failed to edit project: {str(e)}"
+
+    def update_channel_properties(self, project_name, model_name, channel_name, updated_properties):
+        if not self.get_project_data(project_name):
+            return False, "Project not found!"
+        project_data = self.get_project_data(project_name)
+        model = next((m for m in project_data.get("models", []) if m["name"] == model_name), None)
+        if not model:
+            return False, f"Model '{model_name}' not found in project!"
+        channel = next((c for c in model.get("channels", []) if c["channelName"] == channel_name), None)
+        if not channel:
+            return False, f"Channel '{channel_name}' not found in model!"
+
+        channel.update(updated_properties)
+        self._calculate_channel_properties(channel)
+
+        try:
+            result = self.projects_collection.update_one(
+                {"project_name": project_name, "email": self.email, "models.name": model_name},
+                {"$set": {"models.$.channels": model["channels"]}}
+            )
+            logging.info(f"Updated channel {channel_name} in {project_name}/{model_name}: matched {result.matched_count}, modified {result.modified_count}")
+            return True, f"Channel '{channel_name}' updated successfully!"
+        except Exception as e:
+            logging.error(f"Failed to update channel: {str(e)}")
+            return False, f"Failed to update channel: {str(e)}"
 
     def delete_project(self, project_name):
         try:
@@ -174,8 +254,8 @@ class Database:
             self.timeview_collection.delete_many({"project_name": project_name, "email": self.email})
             if project_name in self.projects:
                 self.projects.remove(project_name)
-            logging.info(f"Project {project_name} deleted")
-            return True, f"Project {project_name} deleted successfully!"
+            logging.info(f"Project '{project_name}' deleted")
+            return True, f"Project '{project_name}' deleted successfully!"
         except Exception as e:
             logging.error(f"Failed to delete project: {str(e)}")
             return False, f"Failed to delete project: {str(e)}"
@@ -200,17 +280,14 @@ class Database:
             return False, "Project not found!"
         project_data = self.get_project_data(project_name)
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
-
+            return False, f"Model '{model_name}' not found in project!"
         if not tag_data or "tag_name" not in tag_data:
             logging.error(f"Invalid tag_data: {tag_data}. Must be a dictionary with a 'tag_name' key.")
             return False, "Tag data must be a dictionary with a 'tag_name' key."
-
         tag_name = tag_data.get("tag_name")
         if not tag_name or not isinstance(tag_name, str):
             logging.error(f"Tag name must be a non-empty string, received: {tag_name}")
             return False, "Tag name must be a non-empty string."
-
         if channel_names:
             model = next((m for m in project_data["models"] if m["name"] == model_name), None)
             model_channels = [ch["channelName"] for ch in model.get("channels", [])]
@@ -218,17 +295,14 @@ class Database:
             if invalid_channels:
                 logging.error(f"Invalid channel names provided: {invalid_channels}")
                 return False, f"Invalid channel names: {invalid_channels}"
-
         existing_tag = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
         if existing_tag:
-            return False, "Tag already exists in this project and model!"
-
+            return False, f"Tag '{existing_tag}' already exists in this project and model!"
         try:
             update_data = {f"models.$.tagName": tag_name}
             if channel_names:
                 model = next((m for m in project_data["models"] if m["name"] == model_name), None)
                 update_data[f"models.$.channels"] = [{"channelName": ch} for ch in channel_names]
-
             result = self.projects_collection.update_one(
                 {"project_name": project_name, "email": self.email, "models.name": model_name},
                 {"$set": update_data}
@@ -248,17 +322,14 @@ class Database:
         if not project_data:
             return False, "Project not found!"
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
-
+            return False, f"Model '{model_name}' not found in project!"
         if not new_tag_data or "tag_name" not in new_tag_data:
             logging.error(f"Invalid new_tag_data: {new_tag_data}. Must be a dictionary with a 'tag_name' key.")
             return False, "New tag data must be a dictionary with a 'tag_name' key."
-
         new_tag_name = new_tag_data.get("tag_name")
         if not new_tag_name or not isinstance(new_tag_name, str):
             logging.error(f"New tag name must be a non-empty string, received: {new_tag_name}")
             return False, "New tag name must be a non-empty string."
-
         if channel_names:
             model = next((m for m in project_data["models"] if m["name"] == model_name), None)
             model_channels = [ch["channelName"] for ch in model.get("channels", [])]
@@ -266,14 +337,11 @@ class Database:
             if invalid_channels:
                 logging.error(f"Invalid channel names provided: {invalid_channels}")
                 return False, f"Invalid channel names: {invalid_channels}"
-
         current_tag_name = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
-
         try:
             update_data = {f"models.$.tagName": new_tag_name}
             if channel_names is not None:
                 update_data[f"models.$.channels"] = [{"channelName": ch} for ch in channel_names]
-
             result = self.projects_collection.update_one(
                 {"project_name": project_name, "email": self.email, "models.name": model_name},
                 {"$set": update_data}
@@ -298,12 +366,10 @@ class Database:
         if not project_data:
             return False, "Project not found!"
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
-
+            return False, f"Model '{model_name}' not found in project!"
         tag_name = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
         if not tag_name:
             return False, "No tag to delete!"
-
         try:
             result = self.projects_collection.update_one(
                 {"project_name": project_name, "email": self.email, "models.name": model_name},
@@ -326,15 +392,13 @@ class Database:
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
-
         project_data = self.get_project_data(project_name)
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
+            return False, f"Model '{model_name}' not found in project!"
         current_tag_name = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
         if current_tag_name != tag_name:
             logging.error(f"Tag {tag_name} not found for project {project_name} and model {model_name}!")
             return False, "Tag not found!"
-
         timestamp_str = timestamp if timestamp else datetime.datetime.now().isoformat()
         logging.debug(f"Received {len(values)} values for {tag_name} in {project_name}/{model_name} at {timestamp_str}")
         return True, "Tag values received but not saved to mqttmessage collection"
@@ -347,13 +411,11 @@ class Database:
             if not messages:
                 logging.debug(f"No messages found for {tag_name} in {project_name}/{model_name}")
                 return []
-
             for msg in messages:
                 if "timestamp" not in msg or "values" not in msg:
                     logging.warning(f"Invalid message format for {tag_name}: {msg}")
-                    msg["timestamp"] = msg.get("timestamp", datetime.datetime.now().isoformat())
-                    msg["values"] = msg.get("values", [])
-
+                msg["timestamp"] = msg.get("timestamp", datetime.datetime.now().isoformat())
+                msg["values"] = msg.get("values", [])
             logging.debug(f"Retrieved {len(messages)} messages for {tag_name} in {project_name}/{model_name}")
             return messages
         except Exception as e:
@@ -364,15 +426,13 @@ class Database:
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
-
         project_data = self.get_project_data(project_name)
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
+            return False, f"Model '{model_name}' not found in project!"
         current_tag_name = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
         if current_tag_name != tag_name:
             logging.error(f"Tag {tag_name} not found for project {project_name} and model {model_name}!")
             return False, "Tag not found!"
-
         message_data = {
             "_id": ObjectId(),
             "topic": tag_name,
@@ -395,32 +455,27 @@ class Database:
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return False, "Project not found!"
-
         required_fields = ["topic", "filename", "frameIndex", "message"]
         for field in required_fields:
             if field not in message_data or message_data[field] is None:
                 logging.error(f"Missing or invalid required field {field} in timeview message")
                 return False, f"Missing or invalid required field: {field}"
-
         project_data = self.get_project_data(project_name)
         if model_name not in [m["name"] for m in project_data.get("models", [])]:
-            return False, "Model not found in project!"
+            return False, f"Model '{model_name}' not found in project!"
         current_tag_name = next((m["tagName"] for m in project_data["models"] if m["name"] == model_name), "")
         if current_tag_name != message_data["topic"]:
             logging.error(f"Tag {message_data['topic']} not found for project {project_name} and model {model_name}!")
             return False, "Tag not found!"
-
         message_data.setdefault("numberOfChannels", 1)
         message_data.setdefault("samplingRate", None)
         message_data.setdefault("samplingSize", None)
         message_data.setdefault("messageFrequency", None)
         message_data.setdefault("createdAt", datetime.datetime.now().isoformat())
-
         message_data["project_name"] = project_name
         message_data["model_name"] = model_name
         message_data["email"] = self.email
         message_data["_id"] = ObjectId()
-
         try:
             result = self.timeview_collection.insert_one(message_data)
             logging.info(f"Saved timeview message for {message_data['topic']} in {project_name}/{model_name} with filename {message_data['filename']}: {result.inserted_id}")
@@ -433,7 +488,6 @@ class Database:
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return []
-
         query = {"project_name": project_name, "email": self.email}
         if model_name:
             query["model_name"] = model_name
@@ -441,13 +495,11 @@ class Database:
             query["topic"] = topic
         if filename:
             query["filename"] = filename
-
         try:
             messages = list(self.timeview_collection.find(query).sort("createdAt", 1))
             if not messages:
                 logging.debug(f"No timeview messages found for project {project_name}")
                 return []
-
             logging.debug(f"Retrieved {len(messages)} timeview messages for project {project_name}")
             return messages
         except Exception as e:
@@ -458,11 +510,9 @@ class Database:
         if not self.get_project_data(project_name):
             logging.error(f"Project {project_name} not found!")
             return []
-
         query = {"project_name": project_name, "email": self.email}
         if model_name:
             query["model_name"] = model_name
-
         try:
             filenames = self.timeview_collection.distinct("filename", query)
             sorted_filenames = sorted(filenames, key=lambda x: int(re.match(r"data(\d+)", x).group(1)) if re.match(r"data(\d+)", x) else 0)

@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QPushButton, QLabel, QMessageBox, QScrollArea, QComboBox, QApplication, QTableWidget, QTableWidgetItem
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import Qt, pyqtSignal
 import sys
 import datetime
 import logging
@@ -40,10 +40,16 @@ app.setStyleSheet("""
 """)
 
 class CreateProjectWidget(QWidget):
-    def __init__(self, parent=None):
+    project_edited = pyqtSignal(str, list, str)  # Signal for edited project (new_project_name, updated_models, channel_count)
+
+    def __init__(self, parent=None, edit_mode=False, existing_project_name=None, existing_models=None, existing_channel_count="DAQ4CH"):
         super().__init__(parent)
         self.parent = parent
         self.db = parent.db
+        self.edit_mode = edit_mode
+        self.existing_project_name = existing_project_name
+        self.existing_models = existing_models or []
+        self.existing_channel_count = existing_channel_count
         self.models = []
         self.available_types = ["Displacement", "Acc/Vel"]
         self.available_directions = ["Right", "Left"]
@@ -90,7 +96,7 @@ class CreateProjectWidget(QWidget):
         card_widget.setLayout(card_layout)
         scroll_layout.addWidget(card_widget)
 
-        title_label = QLabel("Create New Project")
+        title_label = QLabel("Edit Project" if self.edit_mode else "Create New Project")
         title_label.setStyleSheet("""
             font-size: 20px;
             font-weight: 600;
@@ -99,7 +105,7 @@ class CreateProjectWidget(QWidget):
         """)
         card_layout.addWidget(title_label, alignment=Qt.AlignCenter)
 
-        subtitle_label = QLabel("Start by defining project details and models")
+        subtitle_label = QLabel("Modify project details and models" if self.edit_mode else "Start by defining project details and models")
         subtitle_label.setStyleSheet("""
             font-size: 14px;
             color: #6b7280;
@@ -123,6 +129,8 @@ class CreateProjectWidget(QWidget):
         project_form.setFormAlignment(Qt.AlignCenter)
         self.project_name_input = QLineEdit()
         self.project_name_input.setPlaceholderText("Project name")
+        if self.edit_mode and self.existing_project_name:
+            self.project_name_input.setText(self.existing_project_name)
         self.project_name_input.setStyleSheet("""
             QLineEdit {
                 border: 1px solid #d1d5db;
@@ -144,6 +152,8 @@ class CreateProjectWidget(QWidget):
 
         self.channel_count_combo = QComboBox()
         self.channel_count_combo.addItems(self.available_channel_counts)
+        if self.edit_mode and self.existing_channel_count:
+            self.channel_count_combo.setCurrentText(self.existing_channel_count)
         self.channel_count_combo.setStyleSheet("""
             QComboBox {
                 border: 1px solid #d1d5db;
@@ -191,6 +201,11 @@ class CreateProjectWidget(QWidget):
         self.model_inputs = []
         card_layout.addLayout(self.model_layout)
 
+        # Pre-populate models if in edit mode
+        if self.edit_mode and self.existing_models:
+            for model in self.existing_models:
+                self.add_model_input(model)
+
         button_layout = QHBoxLayout()
         button_layout.setSpacing(12)
         button_layout.setAlignment(Qt.AlignLeft)
@@ -217,7 +232,7 @@ class CreateProjectWidget(QWidget):
         back_button.clicked.connect(self.back_to_select)
         button_layout.addWidget(back_button)
 
-        create_button = QPushButton("Create Project")
+        create_button = QPushButton("Update Project" if self.edit_mode else "Create Project")
         create_button.setStyleSheet("""
             QPushButton {
                 background-color: #3b82f6;
@@ -235,7 +250,7 @@ class CreateProjectWidget(QWidget):
                 background-color: #1d4ed8;
             }
         """)
-        create_button.clicked.connect(self.create_project)
+        create_button.clicked.connect(self.submit_project)
         button_layout.addWidget(create_button)
 
         card_layout.addLayout(button_layout)
@@ -306,7 +321,7 @@ class CreateProjectWidget(QWidget):
             model_layout.addWidget(table)
             channel_inputs[0] = (table, num_channels)
 
-    def add_model_input(self):
+    def add_model_input(self, existing_model=None):
         channel_count = self.channel_count_combo.currentText()
         num_channels = {"DAQ4CH": 4, "DAQ8CH": 8, "DAQ10CH": 10}.get(channel_count, 4)
 
@@ -358,6 +373,11 @@ class CreateProjectWidget(QWidget):
 
         model_name_input = QLineEdit()
         model_name_input.setPlaceholderText("Model name")
+        if existing_model:
+            model_name = existing_model.get("name", "")
+            if model_name.startswith(channel_count + "_"):
+                model_name = model_name[len(channel_count) + 1:]
+            model_name_input.setText(model_name)
         model_name_input.setStyleSheet("""
             QLineEdit {
                 border: 1px solid #d1d5db;
@@ -379,6 +399,8 @@ class CreateProjectWidget(QWidget):
 
         tag_name_input = QLineEdit()
         tag_name_input.setPlaceholderText("Tag name")
+        if existing_model:
+            tag_name_input.setText(existing_model.get("tagName", ""))
         tag_name_input.setStyleSheet("""
             QLineEdit {
                 border: 1px solid #d1d5db;
@@ -449,20 +471,38 @@ class CreateProjectWidget(QWidget):
         table.setMaximumHeight(table.rowHeight(0) * num_channels + table.horizontalHeader().height() + 20)
         table.resizeColumnsToContents()
 
-        for row in range(num_channels):
-            item = QTableWidgetItem(str(row + 1))
-            item.setTextAlignment(Qt.AlignCenter)
-            table.setItem(row, 0, item)
-            table.setItem(row, 1, QTableWidgetItem(""))
-            table.setItem(row, 2, QTableWidgetItem("Displacement"))
-            table.setItem(row, 3, QTableWidgetItem(""))
-            table.setItem(row, 4, QTableWidgetItem(""))
-            table.setItem(row, 5, QTableWidgetItem(""))
-            table.setItem(row, 6, QTableWidgetItem(""))
-            table.setItem(row, 7, QTableWidgetItem(""))
-            table.setItem(row, 8, QTableWidgetItem(""))
-            table.setItem(row, 9, QTableWidgetItem("Right"))
-            table.setItem(row, 10, QTableWidgetItem(""))
+        if existing_model and existing_model.get("channels"):
+            for row, channel in enumerate(existing_model["channels"]):
+                if row >= num_channels:
+                    break
+                item = QTableWidgetItem(str(row + 1))
+                item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 0, item)
+                table.setItem(row, 1, QTableWidgetItem(channel.get("channelName", "")))
+                table.setItem(row, 2, QTableWidgetItem(channel.get("type", "Displacement")))
+                table.setItem(row, 3, QTableWidgetItem(channel.get("sensitivity", "")))
+                table.setItem(row, 4, QTableWidgetItem(channel.get("unit", "")))
+                table.setItem(row, 5, QTableWidgetItem(channel.get("correctionValue", "")))
+                table.setItem(row, 6, QTableWidgetItem(channel.get("gain", "")))
+                table.setItem(row, 7, QTableWidgetItem(channel.get("unitType", "")))
+                table.setItem(row, 8, QTableWidgetItem(channel.get("angle", "")))
+                table.setItem(row, 9, QTableWidgetItem(channel.get("angleDirection", "Right")))
+                table.setItem(row, 10, QTableWidgetItem(channel.get("shaft", "")))
+        else:
+            for row in range(num_channels):
+                item = QTableWidgetItem(str(row + 1))
+                item.setTextAlignment(Qt.AlignCenter)
+                table.setItem(row, 0, item)
+                table.setItem(row, 1, QTableWidgetItem(""))
+                table.setItem(row, 2, QTableWidgetItem("Displacement"))
+                table.setItem(row, 3, QTableWidgetItem(""))
+                table.setItem(row, 4, QTableWidgetItem(""))
+                table.setItem(row, 5, QTableWidgetItem(""))
+                table.setItem(row, 6, QTableWidgetItem(""))
+                table.setItem(row, 7, QTableWidgetItem(""))
+                table.setItem(row, 8, QTableWidgetItem(""))
+                table.setItem(row, 9, QTableWidgetItem("Right"))
+                table.setItem(row, 10, QTableWidgetItem(""))
 
         model_layout.addWidget(table)
 
@@ -490,7 +530,7 @@ class CreateProjectWidget(QWidget):
         table.resizeColumnsToContents()
 
     def remove_model_input(self, model_widget):
-        if len(self.model_inputs) > 1:
+        if len(self.model_inputs) > 1 or not self.edit_mode:
             for inputs in self.model_inputs:
                 if inputs[0] == model_widget:
                     self.model_inputs.remove(inputs)
@@ -500,15 +540,11 @@ class CreateProjectWidget(QWidget):
                         widget.layout().itemAt(0).layout().itemAt(0).widget().setText(f"Model {i + 1}")
                     break
 
-    def create_project(self):
+    def submit_project(self):
         project_name = self.project_name_input.text().strip()
+        channel_count = self.channel_count_combo.currentText()
         if not project_name:
             QMessageBox.warning(self, "Error", "Project name cannot be empty!")
-            return
-
-        # Check if project already exists
-        if self.db.projects_collection.find_one({"project_name": project_name, "email": self.db.email}):
-            QMessageBox.warning(self, "Error", "A project with this name already exists!")
             return
 
         if not self.model_inputs:
@@ -516,7 +552,7 @@ class CreateProjectWidget(QWidget):
             return
 
         self.models = []
-        for _, model_name_input, tag_name_input, channel_inputs, channel_count in self.model_inputs:
+        for _, model_name_input, tag_name_input, channel_inputs, _ in self.model_inputs:
             model_name = model_name_input.text().strip()
             tag_name = tag_name_input.text().strip()
             if not model_name:
@@ -554,23 +590,27 @@ class CreateProjectWidget(QWidget):
             })
 
         try:
-            project_data = {
-                "project_name": project_name,
-                "email": self.db.email,
-                "createdAt": datetime.datetime.now().isoformat(),
-                "models": self.models
-            }
-            success, message = self.db.create_project(project_name, self.models)
-            if success:
-                QMessageBox.information(self, "Success", "Project created successfully!")
-                logging.info(f"Created new project: {project_name} with {len(self.models)} models")
-                logging.debug(f"Calling load_project for project: {project_name}")
-                self.parent.load_project(project_name)
+            if self.edit_mode:
+                self.project_edited.emit(project_name, self.models, channel_count)
             else:
-                QMessageBox.warning(self, "Error", message)
+                project_data = {
+                    "project_name": project_name,
+                    "email": self.db.email,
+                    "createdAt": datetime.datetime.now().isoformat(),
+                    "models": self.models,
+                    "channel_count": channel_count
+                }
+                success, message = self.db.create_project(project_name, self.models, channel_count)
+                if success:
+                    QMessageBox.information(self, "Success", "Project created successfully!")
+                    logging.info(f"Created new project: {project_name} with {len(self.models)} models")
+                    logging.debug(f"Calling load_project for project: {project_name}")
+                    self.parent.load_project(project_name)
+                else:
+                    QMessageBox.warning(self, "Error", message)
         except Exception as e:
-            logging.error(f"Error creating project: {str(e)}")
-            QMessageBox.warning(self, "Error", f"Failed to create project: {str(e)}")
+            logging.error(f"Error submitting project: {str(e)}")
+            QMessageBox.warning(self, "Error", f"Failed to submit project: {str(e)}")
 
     def back_to_select(self):
         logging.debug("Returning to project selection UI")
