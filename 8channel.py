@@ -21,7 +21,7 @@ class MQTTPublisher(QObject):
         self.sample_rate = 4096  # Samples per second
         self.time_per_message = 1.0  # 1 second for 4096 samples
         self.current_time = 0.0
-        self.num_channels = 4  # Main channels
+        self.num_channels = 8  # Main channels
         self.samples_per_channel = 4096  # Samples per channel
         self.num_tacho_channels = 2  # Tacho freq + tacho trigger
         self.frame_index = 0
@@ -111,6 +111,6 @@ class MQTTPublisher(QObject):
 if __name__ == "__main__":
     app = QApplication([])
     broker = "192.168.1.238"
-    topics = ["sarayu/d1/topic1"]
+    topics = ["sarayu/tag1/topic1"]
     mqtt_publisher = MQTTPublisher(broker, topics)
     app.exec_()

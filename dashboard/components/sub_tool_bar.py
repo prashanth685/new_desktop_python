@@ -6,6 +6,7 @@ from PyQt5.QtCore import QSize, Qt, QTimer
 from PyQt5.QtGui import QIcon
 import logging
 import re
+import time
 
 
 class LayoutSelectionDialog(QDialog):
@@ -46,11 +47,7 @@ class LayoutSelectionDialog(QDialog):
             btn.setFixedSize(80, 80)
             btn.setToolTip(layout_name)
             self.layout_buttons[layout_name] = btn
-
-            # btn.clicked.connect(lambda _, l=layout_name): self.select_layout(l))
             btn.clicked.connect(lambda _, l=layout_name: self.select_layout(l))
-
-
             grid.addWidget(btn, row, col)
             col += 1
             if col >= 3:
@@ -79,11 +76,14 @@ class SubToolBar(QWidget):
         self.selected_layout = "2x2"  # Default layout
         self.filename_edit = None
         self.saving_indicator = None
+        self.timer_label = None
         self.blink_timer = QTimer(self)
         self.blink_timer.timeout.connect(self.toggle_saving_indicator)
         self.blink_state = False
+        self.timer = QTimer(self)
+        self.timer.timeout.connect(self.update_timer)
+        self.start_time = None
         self.initUI()
-        # Connect signal with error handling
         try:
             self.parent.mqtt_status_changed.connect(self.update_subtoolbar)
             logging.info("SubToolBar: mqtt_status_changed signal connected successfully")
@@ -108,13 +108,28 @@ class SubToolBar(QWidget):
             text = "rec 🔴" if self.blink_state else "rec ⚪"
             self.saving_indicator.setText(text)
 
+    def update_timer(self):
+        if self.start_time and self.timer_label:
+            elapsed = int(time.time() - self.start_time)
+            hours = elapsed // 3600
+            minutes = (elapsed % 3600) // 60
+            seconds = elapsed % 60
+            self.timer_label.setText(f"{hours:02d}:{minutes:02d}:{seconds:02d}")
+
     def start_blinking(self):
         self.blink_timer.start(500)  # 500ms interval
+        self.start_time = time.time()
+        self.timer.start(1000)  # Update timer every second
+        if self.timer_label:
+            self.timer_label.setText("00:00:00")
 
     def stop_blinking(self):
         self.blink_timer.stop()
+        self.timer.stop()
         if self.saving_indicator:
             self.saving_indicator.setText("")
+        if self.timer_label:
+            self.timer_label.setText("")
 
     def update_subtoolbar(self):
         logging.debug(f"SubToolBar: Updating toolbar, MQTT connected: {self.parent.mqtt_connected}")
@@ -158,17 +173,20 @@ class SubToolBar(QWidget):
                 border: 1px solid #b0bec5;
             }
         """)
-        # Enable editing only for Time View
         is_time_view = self.parent.current_feature == "Time View"
         self.filename_edit.setReadOnly(not is_time_view)
-        self.filename_edit.setEnabled(True)  # Always enabled to show filename
+        self.filename_edit.setEnabled(True)
         self.refresh_filename()
         self.toolbar.addWidget(self.filename_edit)
 
-        # Add saving indicator
         self.saving_indicator = QLabel("")
         self.saving_indicator.setStyleSheet("font-size: 20px; padding: 0px 8px;")
         self.toolbar.addWidget(self.saving_indicator)
+
+        self.timer_label = QLabel("")
+        self.timer_label.setStyleSheet("font-size: 20px; padding: 0px 8px;")
+        self.toolbar.addWidget(self.timer_label)
+
         if self.parent.is_saving:
             self.start_blinking()
         else:
@@ -207,7 +225,6 @@ class SubToolBar(QWidget):
                 """)
                 logging.debug(f"SubToolBar: Added action '{text_icon}', enabled: {enabled}, background: {background_color}")
 
-        # Enable save/stop actions based on is_saving state
         def start_saving_wrapper():
             self.parent.start_saving()
             self.start_blinking()
@@ -258,30 +275,25 @@ class SubToolBar(QWidget):
         logging.debug("SubToolBar: Toolbar updated and repainted")
 
     def refresh_filename(self):
-        """Refresh the QLineEdit with the current or next filename."""
         if not self.filename_edit:
             logging.warning("SubToolBar: No filename_edit initialized")
             return
 
         try:
-            # Default filename
             next_filename = "data1"
             current_filename = None
             filename_counter = 1
             is_saving = False
 
-            # Check for Time View and current_widget
             if hasattr(self.parent, 'current_widget'):
                 current_filename = getattr(self.parent.current_widget, 'current_filename', None)
                 filename_counter = getattr(self.parent.current_widget, 'filename_counter', 1)
                 is_saving = getattr(self.parent.current_widget, 'is_saving', False)
 
-            # Query database for existing filenames
             model_name = getattr(self.parent.current_widget, 'model_name', None) if hasattr(self.parent, 'current_widget') else None
             filenames = self.parent.db.get_distinct_filenames(self.parent.current_project, model_name) if self.parent.current_project else []
             logging.debug(f"SubToolBar: Retrieved {len(filenames)} filenames from database: {filenames}")
 
-            # Determine the next filename based on existing filenames
             if filenames:
                 numbers = [int(re.match(r"data(\d+)", f).group(1)) for f in filenames if re.match(r"data(\d+)", f)]
                 filename_counter = max(numbers, default=0) + 1 if numbers else 1
@@ -289,7 +301,6 @@ class SubToolBar(QWidget):
             else:
                 next_filename = f"data{filename_counter}"
 
-            # Set the filename in QLineEdit
             if is_saving and current_filename:
                 self.filename_edit.setText(current_filename)
                 logging.debug(f"SubToolBar: Set filename_edit to current_filename: {current_filename}")

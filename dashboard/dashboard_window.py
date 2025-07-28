@@ -62,6 +62,7 @@ class DashboardWindow(QWidget):
         self.email = email
         self.auth_window = auth_window
         self.current_project = None
+        self.channel_count = None  # Store channel count for the current project
         self.open_dashboards = {}
         self.current_feature = None
         self.mqtt_handler = None
@@ -203,6 +204,7 @@ class DashboardWindow(QWidget):
         self.tree_view.setVisible(False)
         self.sub_tool_bar.setVisible(False)
         self.current_project = None
+        self.channel_count = None
         self.setWindowTitle('Sarayu Desktop Application')
         self.select_project_widget = SelectProjectWidget(self)
         self.main_section.set_widget(self.select_project_widget)
@@ -227,6 +229,32 @@ class DashboardWindow(QWidget):
 
     def load_project(self, project_name):
         self.current_project = project_name
+        project_data = self.db.get_project_data(project_name)
+        if not project_data:
+            self.console.append_to_console(f"Error: Project {project_name} not found.")
+            logging.error(f"Project {project_name} not found!")
+            self.display_select_project()
+            return
+
+        # Convert channel_count to integer
+        channel_count_map = {
+            "DAQ4CH": 4,
+            "DAQ8CH": 8,
+            "DAQ10CH": 10
+        }
+        raw_channel_count = project_data.get("channel_count", 4)
+        try:
+            if isinstance(raw_channel_count, str):
+                self.channel_count = channel_count_map.get(raw_channel_count, int(raw_channel_count))
+            else:
+                self.channel_count = int(raw_channel_count)
+            if self.channel_count not in [4, 8, 10]:
+                raise ValueError(f"Invalid channel count: {self.channel_count}")
+        except (ValueError, TypeError) as e:
+            self.console.append_to_console(f"Error: Invalid channel count {raw_channel_count} for project {project_name}. Defaulting to 4.")
+            logging.error(f"Invalid channel count {raw_channel_count} for project {project_name}: {str(e)}. Defaulting to 4.")
+            self.channel_count = 4
+
         self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
         self.tree_view.setVisible(True)
         self.sub_tool_bar.setVisible(True)
@@ -236,7 +264,8 @@ class DashboardWindow(QWidget):
         self.main_splitter.setSizes([tree_view_width, right_container_width])
         logging.debug(f"TreeView visibility: {self.tree_view.isVisible()}")
         logging.debug(f"SubToolBar visibility: {self.sub_tool_bar.isVisible()}")
-        logging.debug(f"Loading project: {project_name}")
+        logging.debug(f"Loading project: {project_name} with {self.channel_count} channels")
+        self.console.append_to_console(f"Loaded project {project_name} with {self.channel_count} channels")
         self.clear_content_layout()
         if self.project_structure_widget:
             self.project_structure_widget.setParent(None)
@@ -333,6 +362,10 @@ class DashboardWindow(QWidget):
 
     def on_data_received(self, feature_name, tag_name, model_name, values, sample_rate):
         try:
+            if len(values) < self.channel_count:
+                self.console.append_to_console(f"Received {len(values)} channels, expected at least {self.channel_count}")
+                logging.warning(f"Received {len(values)} channels, expected at least {self.channel_count}")
+                return
             for key, feature_instance in self.feature_instances.items():
                 instance_feature, instance_model, instance_channel, _ = key
                 if instance_feature == feature_name and instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
@@ -423,9 +456,51 @@ class DashboardWindow(QWidget):
         try:
             if not self.db.is_connected():
                 self.db.reconnect()
+
+            # Validate channel counts based on DAQ type
+            valid_channel_counts = {
+                "DAQ4CH": 4,
+                "DAQ8CH": 8,
+                "DAQ10CH": 10
+            }
+            required_channels = valid_channel_counts.get(channel_count)
+            if not required_channels:
+                try:
+                    required_channels = int(channel_count)
+                    if required_channels not in [4, 8, 10]:
+                        raise ValueError(f"Invalid channel count: {channel_count}")
+                except (ValueError, TypeError):
+                    QMessageBox.warning(self, "Error", f"Invalid channel count: {channel_count}")
+                    return
+
+            # Validate that each model has the correct number of channels
+            for model in updated_models:
+                if len(model.get("channels", [])) != required_channels:
+                    model_channels = model.get("channels", [])
+                    # Adjust channels to match required count
+                    if len(model_channels) < required_channels:
+                        model_channels.extend([
+                            {
+                                "channelName": f"Channel_{j+1}",
+                                "type": "Displacement",
+                                "sensitivity": "1.0",
+                                "unit": "mil",
+                                "correctionValue": "",
+                                "gain": "",
+                                "unitType": "",
+                                "angle": "",
+                                "angleDirection": "Right",
+                                "shaft": ""
+                            } for j in range(len(model_channels), required_channels)
+                        ])
+                    elif len(model_channels) > required_channels:
+                        model_channels = model_channels[:required_channels]
+                    model["channels"] = model_channels
+
             success, message = self.db.edit_project(self.current_project, new_project_name, updated_models, channel_count)
             if success:
                 self.current_project = new_project_name
+                self.channel_count = required_channels
                 self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
                 self.load_project(new_project_name)  # Reload project to refresh UI
                 self.tool_bar.update_toolbar()
@@ -438,6 +513,7 @@ class DashboardWindow(QWidget):
                 QMessageBox.information(self, "Success", message)
                 self.file_bar.update_file_bar()
                 self.display_select_project()  # Return to project selection after editing
+                self.console.append_to_console(f"Project updated: {new_project_name} with {required_channels} channels")
             else:
                 QMessageBox.warning(self, "Error", message)
         except Exception as e:
@@ -452,10 +528,18 @@ class DashboardWindow(QWidget):
             return
 
         project_data = self.db.get_project_data(self.current_project)
+        if not project_data:
+            QMessageBox.warning(self, "Error", "Project data not found!")
+            return
+
         model = next((m for m in project_data["models"] if m["name"] == selected_model), None)
+        if not model:
+            QMessageBox.warning(self, "Error", f"Model '{selected_model}' not found!")
+            return
+
         channel = next((c for c in model["channels"] if c["channelName"] == selected_channel), None)
         if not channel:
-            QMessageBox.warning(self, "Error", "Channel not found!")
+            QMessageBox.warning(self, "Error", f"Channel '{selected_channel}' not found!")
             return
 
         properties = ["type", "sensitivity", "unit", "correctionValue", "gain", "unitType", "angle", "angleDirection", "shaft"]
@@ -561,7 +645,7 @@ class DashboardWindow(QWidget):
 
     def display_feature_content(self, feature_name, project_name):
         try:
-            logging.debug(f"Attempting to display feature: {feature_name} for project: {project_name}")
+            logging.debug(f"Attempting to display feature: {feature_name} for project: {project_name} with channel_count: {self.channel_count}")
             self.current_project = project_name
             self.current_feature = feature_name
             self.is_saving = False
@@ -608,16 +692,32 @@ class DashboardWindow(QWidget):
                 logging.warning(f"Unknown feature: {feature_name}")
                 QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
                 return
+            # Validate channel_count before creating feature
+            if feature_name in ["Orbit", "FFT"] and not isinstance(self.channel_count, int):
+                self.console.append_to_console(f"Error: Invalid channel_count {self.channel_count} for {feature_name}. Defaulting to 4.")
+                logging.error(f"Invalid channel_count {self.channel_count} for {feature_name}. Defaulting to 4.")
+                self.channel_count = 4
             for channel in channels:
                 unique_id = int(time.time() * 1000)
                 key = (feature_name, selected_model, channel, unique_id)
                 try:
                     if not self.db.is_connected():
                         self.db.reconnect()
-                    feature_instance = feature_classes[feature_name](
-                        self, self.db, project_name, channel=channel,
-                        model_name=selected_model, console=self.console
-                    )
+                    # Pass channel_count to Orbit and FFT features
+                    feature_kwargs = {
+                        "parent": self,
+                        "db": self.db,
+                        "project_name": project_name,
+                        "channel": channel,
+                        "model_name": selected_model,
+                        "console": self.console
+                    }
+                    if feature_name in ["Orbit", "FFT"]:
+                        feature_kwargs["channel_count"] = self.channel_count
+                    feature_instance = feature_classes[feature_name](**feature_kwargs)
+                    # Update channel for Orbit and FFT features
+                    if feature_name in ["Orbit", "FFT"] and channel and hasattr(feature_instance, 'update_selected_channel'):
+                        feature_instance.update_selected_channel(channel)
                     self.feature_instances[key] = feature_instance
                     widget = feature_instance.get_widget()
                     if widget:

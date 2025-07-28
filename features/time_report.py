@@ -141,9 +141,10 @@ class TimeReportFeature:
         self.trackers = []
         self.trigger_lines = []
         self.active_line_idx = None
-        self.num_channels = 4
-        self.num_plots = 6
-        self.sample_rate = 4096
+        self.num_channels = 0  # Will be set dynamically
+        self.num_plots = 0     # Will be set dynamically
+        self.tacho_channels_count = 2  # Matches time_view.py
+        self.sample_rate = None
         self.filenames = []
         self.selected_filename = None
         self.file_start_time = None
@@ -151,6 +152,7 @@ class TimeReportFeature:
         self.start_time = None
         self.end_time = None
         self.use_full_range = True
+        self.scaling_factor = 3.3 / 65535  # Matches time_view.py
         self.init_ui_deferred()
 
     def init_ui_deferred(self):
@@ -338,15 +340,32 @@ class TimeReportFeature:
 
     def load_data_async(self):
         try:
-            self.init_plots()
             self.refresh_filenames()
         except Exception as e:
             logging.error(f"Error in async data loading: {str(e)}")
             if self.console:
                 self.console.append_to_console(f"Error loading Time Report data: {str(e)}")
 
-    def init_plots(self):
-        colors = ['r', 'g', 'b', 'y', 'c', 'm']
+    def init_plots(self, num_channels, tacho_channels_count):
+        self.num_channels = num_channels
+        self.tacho_channels_count = tacho_channels_count
+        self.num_plots = num_channels + tacho_channels_count
+
+        # Clear existing plots
+        self.plot_widgets = []
+        self.plots = []
+        self.data = []
+        self.vlines = []
+        self.proxies = []
+        self.trackers = []
+        self.trigger_lines = []
+
+        # Clear scroll content
+        self.scroll_content = QWidget()
+        self.scroll_layout = QVBoxLayout(self.scroll_content)
+        self.scroll_area.setWidget(self.scroll_content)
+
+        colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', 'b', '#FF4500', '#32CD32', '#00CED1', '#FFD700', '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
             plot_widget.setFixedHeight(250)
@@ -356,7 +375,7 @@ class TimeReportFeature:
             elif i == self.num_channels:
                 plot_widget.setLabel('left', 'Tacho Frequency')
             else:
-                plot_widget.setLabel('left', 'Tacho Trigger')
+                plot_widget.setLabel('left', f'Tacho Trigger {i - self.num_channels}')
                 plot_widget.setYRange(-0.5, 1.5, padding=0)
             plot_widget.setLabel('bottom', 'Time')
             plot_widget.showGrid(x=True, y=True)
@@ -590,7 +609,7 @@ class TimeReportFeature:
             widget.clear()
             widget.addLegend()
             widget.showGrid(x=True, y=True)
-            if widget.getAxis('left').labelText == 'Tacho Trigger':
+            if widget.getAxis('left').labelText.startswith('Tacho Trigger'):
                 widget.setYRange(-0.5, 1.5, padding=0)
         self.data = [[] for _ in range(self.num_plots)]
         self.channel_times = []
@@ -637,6 +656,23 @@ class TimeReportFeature:
             progress.setValue(15)
             messages.sort(key=lambda x: datetime.fromisoformat(x['createdAt'].replace('Z', '+00:00')).timestamp())
 
+            # Determine number of channels dynamically
+            first_msg = messages[0]
+            num_channels = first_msg.get('numberOfChannels', 0)
+            tacho_channels_count = self.tacho_channels_count
+            if not num_channels or len(first_msg['message']['channel_data']) != num_channels:
+                self.clear_plots()
+                progress.setValue(100)
+                progress.close()
+                if self.console:
+                    self.console.append_to_console(f"Invalid channel data in {filename}")
+                return
+
+            # Initialize plots with dynamic channel counts
+            progress.setLabelText("Initializing plots...")
+            progress.setValue(20)
+            self.init_plots(num_channels, tacho_channels_count)
+
             if self.use_full_range:
                 self.start_time = self.file_start_time.timestamp()
                 self.end_time = self.file_end_time.timestamp()
@@ -654,7 +690,7 @@ class TimeReportFeature:
 
             # Filter messages by time range
             progress.setLabelText("Filtering messages by time range...")
-            progress.setValue(20)
+            progress.setValue(25)
             filtered_messages = [
                 msg for msg in messages
                 if self.start_time <= datetime.fromisoformat(msg['createdAt'].replace('Z', '+00:00')).timestamp() <= self.end_time
@@ -719,10 +755,10 @@ class TimeReportFeature:
 
                 # Ensure data is appended in chronological order
                 for ch in range(self.num_channels):
-                    filtered_data = np.array(channel_data[ch])[channel_mask]
+                    filtered_data = np.array(channel_data[ch])[channel_mask] * self.scaling_factor
                     if len(filtered_data) > 0:
                         channel_data_agg[ch].extend(filtered_data)
-                filtered_tacho_freq = np.array(tacho_freq)[tacho_mask]
+                filtered_tacho_freq = np.array(tacho_freq)[tacho_mask] / 100  # Matches time_view.py scaling
                 if len(filtered_tacho_freq) > 0:
                     tacho_freq_agg.extend(filtered_tacho_freq)
                 filtered_tacho_trigger = np.array(tacho_trigger)[tacho_mask]
@@ -754,7 +790,8 @@ class TimeReportFeature:
             for ch in range(self.num_channels):
                 self.data[ch] = np.array(channel_data_agg[ch])
             self.data[self.num_channels] = np.array(tacho_freq_agg)
-            self.data[self.num_plots - 1] = np.array(tacho_trigger_agg)
+            if self.tacho_channels_count >= 2:
+                self.data[self.num_plots - 1] = np.array(tacho_trigger_agg)
             self.channel_times = np.array(channel_times_agg)
             self.tacho_times = np.array(tacho_times_agg)
 
@@ -765,10 +802,10 @@ class TimeReportFeature:
                 widget.clear()
                 widget.addLegend()
                 widget.showGrid(x=True, y=True)
-                if widget.getAxis('left').labelText == 'Tacho Trigger':
+                if widget.getAxis('left').labelText.startswith('Tacho Trigger'):
                     widget.setYRange(-0.5, 1.5, padding=0)
 
-            colors = ['r', 'g', 'b', 'y', 'c', 'm']
+            colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', 'w', '#FF4500', '#32CD32', '#00CED1', '#FFD700', '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']
             for ch in range(self.num_plots):
                 times = self.tacho_times if ch >= self.num_channels else self.channel_times
                 if len(self.data[ch]) > 0 and len(times) > 0:
@@ -784,7 +821,7 @@ class TimeReportFeature:
                         self.console.append_to_console(f"No data for plot {ch} in time range")
 
             # Add trigger lines
-            if len(self.data[self.num_plots - 1]) > 0 and len(self.tacho_times) > 0:
+            if self.tacho_channels_count >= 2 and len(self.data[self.num_plots - 1]) > 0 and len(self.tacho_times) > 0:
                 trigger_indices = np.where(self.data[self.num_plots - 1] == 1)[0]
                 self.trigger_lines = [None] * (self.num_plots - 1) + [[]]
                 for idx in trigger_indices:

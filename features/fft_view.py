@@ -1,8 +1,6 @@
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QComboBox, QLineEdit, QGridLayout
-from PyQt5.QtGui import QDoubleValidator
-from PyQt5.QtGui import QIntValidator
+from PyQt5.QtGui import QDoubleValidator, QIntValidator, QIcon
 from PyQt5.QtCore import QTimer, Qt
-from PyQt5.QtGui import QIcon
 import pyqtgraph as pg
 import numpy as np
 import logging
@@ -30,7 +28,7 @@ class FFTSettings:
         self.updated_at = datetime.utcnow()
 
 class FFTViewFeature:
-    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, layout="vertical"):
+    def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, layout="vertical", channel_count=4):
         self.parent = parent
         self.db = db
         self.project_name = project_name
@@ -53,11 +51,14 @@ class FFTViewFeature:
         self.mongo_client = MongoClient("mongodb://localhost:27017")
         self.project_id = None
         self.settings = FFTSettings(None)
-        self.data_buffer = []  # For averaging
+        self.data_buffer = []
         self.settings_panel = None
         self.settings_button = None
+        self.channel_count = channel_count
         self.initUI()
         self.initialize_async()
+        if self.console:
+            self.console.append_to_console(f"Initialized FFTViewFeature for {self.model_name}/{self.channel or 'No Channel'} with {self.channel_count} channels")
 
     def initUI(self):
         self.widget = QWidget()
@@ -67,9 +68,12 @@ class FFTViewFeature:
         # Settings and channel selection
         top_layout = QHBoxLayout()
         self.settings_button = QPushButton("Settings")
-        self.settings_button.setIcon(QIcon("settings_icon.png"))  # Replace with your image path
+        self.settings_button.setIcon(QIcon("settings_icon.png"))
         self.settings_button.clicked.connect(self.toggle_settings)
         top_layout.addWidget(self.settings_button)
+        self.channel_combo = QComboBox()
+        self.channel_combo.currentTextChanged.connect(self.update_channel)
+        top_layout.addWidget(self.channel_combo)
         top_layout.addStretch()
         main_layout.addLayout(top_layout)
 
@@ -191,9 +195,6 @@ class FFTViewFeature:
         main_layout.addLayout(plot_layout)
         self.update_timer.start(self.update_interval)
 
-        if self.console:
-            self.console.append_to_console(f"Initialized FFTViewFeature with channel: {self.channel}, model: {self.model_name}")
-
     def initialize_async(self):
         try:
             database = self.mongo_client.get_database("changed_db")
@@ -210,19 +211,38 @@ class FFTViewFeature:
                 return
 
             channels = model.get("channels", [])
+            if len(channels) != self.channel_count:
+                self.log_and_set_status(f"Warning: Model {self.model_name} has {len(channels)} channels, expected {self.channel_count}")
+            self.channel_combo.clear()
+            channel_names = [ch.get("channelName", f"Channel_{i+1}") for i, ch in enumerate(channels)]
+            self.channel_combo.addItems(channel_names)
+            if self.channel and self.channel in channel_names:
+                self.channel_combo.setCurrentText(self.channel)
+
             for idx, ch in enumerate(channels):
                 if ch.get("channelName") == self.channel or model.get("tagName") == self.channel:
                     self.channel_index = idx
                     break
             else:
-                self.log_and_set_status(f"Channel {self.channel} not found for model {self.model_name}.")
                 self.channel_index = 0
+                self.log_and_set_status(f"Channel {self.channel} not found for model {self.model_name}, defaulting to index 0")
 
             self.load_settings_from_database()
             if self.console:
                 self.console.append_to_console(f"Initialized FFTViewFeature with project_id: {self.project_id}, channel_index: {self.channel_index}")
         except Exception as e:
             self.log_and_set_status(f"Error initializing FFTViewFeature: {str(e)}")
+
+    def update_channel(self, channel):
+        self.channel = channel
+        self.cache_channel_index()
+        self.magnitude_plot_widget.setTitle(f"Magnitude Spectrum - {self.model_name} - {self.channel or 'Select Channel'}")
+        self.phase_plot_widget.setTitle(f"Phase Spectrum - {self.model_name} - {self.channel or 'Select Channel'}")
+        self.data_buffer = []
+        self.magnitude_plot_item.setData([], [])
+        self.phase_plot_item.setData([], [])
+        if self.console:
+            self.console.append_to_console(f"Selected channel: {self.channel} for FFTViewFeature")
 
     def load_settings_from_database(self):
         try:
@@ -302,7 +322,6 @@ class FFTViewFeature:
             self.settings.weighting_mode = self.settings_widgets["WeightingMode"].currentText()
             self.settings.linear_mode = self.settings_widgets["LinearMode"].currentText()
 
-            # Validate settings
             if self.settings.start_frequency >= self.settings.stop_frequency:
                 self.settings.start_frequency = 10.0
                 self.settings.stop_frequency = 2000.0
@@ -327,7 +346,7 @@ class FFTViewFeature:
             self.settings_button.setVisible(True)
             if self.console:
                 self.console.append_to_console("FFT settings updated and saved.")
-            self.update_plot()  # Apply new settings immediately
+            self.update_plot()
         except Exception as e:
             self.log_and_set_status(f"Error saving FFT settings: {str(e)}")
 
@@ -354,6 +373,8 @@ class FFTViewFeature:
                 for model in project_data["models"]:
                     if model.get("name") == self.model_name:
                         channels = model.get("channels", [])
+                        if len(channels) != self.channel_count:
+                            self.log_and_set_status(f"Warning: Model {self.model_name} has {len(channels)} channels, expected {self.channel_count}")
                         for idx, ch in enumerate(channels):
                             if ch.get("channelName") == self.channel or model.get("tagName") == self.channel:
                                 self.channel_index = idx
@@ -376,6 +397,9 @@ class FFTViewFeature:
             return
 
         try:
+            if len(values) < self.channel_count:
+                self.log_and_set_status(f"Received {len(values)} channels, expected at least {self.channel_count}")
+                return
             if self.channel_index >= len(values):
                 self.log_and_set_status(f"Channel index {self.channel_index} out of range for {len(values)} channels")
                 return
@@ -386,7 +410,6 @@ class FFTViewFeature:
             self.latest_data = raw_data * scaling_factor
             self.data_buffer.append(self.latest_data.copy())
 
-            # Trim buffer to number_of_averages
             if len(self.data_buffer) > self.settings.number_of_averages:
                 self.data_buffer = self.data_buffer[-self.settings.number_of_averages:]
 
@@ -403,49 +426,41 @@ class FFTViewFeature:
             return
 
         try:
-            # Prepare data
             data = self.data_buffer[-1] if self.settings.averaging_mode == "No Averaging" else np.mean(self.data_buffer, axis=0)
             n = len(data)
             if n < 2:
                 self.log_and_set_status(f"Insufficient data length: {n}")
                 return
 
-            # Apply window
             window_name = self.settings.window_type.lower() if self.settings.window_type != "None" else "rectangular"
             window = get_window(window_name, n)
             windowed_data = data * window
 
-            # Compute FFT
             target_length = 2 ** int(np.ceil(np.log2(n)))
             padded_data = np.zeros(target_length)
             padded_data[:n] = windowed_data
             fft_result = fft(padded_data)
             half = target_length // 2
 
-            # Frequency axis
             frequencies = np.linspace(0, self.sample_rate / 2, half)
             freq_mask = (frequencies >= self.settings.start_frequency) & (frequencies <= self.settings.stop_frequency)
             filtered_frequencies = frequencies[freq_mask]
 
-            # Magnitude and phase
             magnitudes = np.abs(fft_result[:half]) / target_length
             phases = np.degrees(np.angle(fft_result[:half]))
             filtered_magnitudes = magnitudes[freq_mask]
             filtered_phases = phases[freq_mask]
 
-            # Apply weighting
             if self.settings.weighting_mode != "Linear":
-                # Simplified weighting (A, B, C-weighting curves are approximated)
                 weights = np.ones_like(filtered_frequencies)
                 if self.settings.weighting_mode == "A-Weighting":
-                    weights = 1.0 / (1.0 + (filtered_frequencies / 1000) ** 2)  # Simplified A-weighting
+                    weights = 1.0 / (1.0 + (filtered_frequencies / 1000) ** 2)
                 elif self.settings.weighting_mode == "B-Weighting":
-                    weights = 1.0 / (1.0 + (filtered_frequencies / 500) ** 2)  # Simplified B-weighting
+                    weights = 1.0 / (1.0 + (filtered_frequencies / 500) ** 2)
                 elif self.settings.weighting_mode == "C-Weighting":
-                    weights = 1.0 / (1.0 + (filtered_frequencies / 200) ** 2)  # Simplified C-weighting
+                    weights = 1.0 / (1.0 + (filtered_frequencies / 200) ** 2)
                 filtered_magnitudes *= weights
 
-            # Apply averaging
             if self.settings.averaging_mode == "Linear" and len(self.data_buffer) > 1:
                 avg_magnitudes = np.mean([np.abs(fft(np.zeros(target_length)[:n] + d * window)[:half]) / target_length for d in self.data_buffer], axis=0)
                 avg_phases = np.mean([np.degrees(np.angle(fft(np.zeros(target_length)[:n] + d * window)[:half])) for d in self.data_buffer], axis=0)
@@ -462,14 +477,12 @@ class FFTViewFeature:
                 filtered_magnitudes = avg_magnitudes[freq_mask]
                 filtered_phases = avg_phases[freq_mask]
 
-            # Adjust for number of lines
             if len(filtered_frequencies) > self.settings.number_of_lines:
                 indices = np.linspace(0, len(filtered_frequencies) - 1, self.settings.number_of_lines, dtype=int)
                 filtered_frequencies = filtered_frequencies[indices]
                 filtered_magnitudes = filtered_magnitudes[indices]
                 filtered_phases = filtered_phases[indices]
 
-            # Update plots
             self.magnitude_plot_item.setData(filtered_frequencies, filtered_magnitudes)
             self.phase_plot_item.setData(filtered_frequencies, filtered_phases)
             self.magnitude_plot_widget.setXRange(self.settings.start_frequency, self.settings.stop_frequency)
@@ -492,3 +505,9 @@ class FFTViewFeature:
     def close(self):
         self.update_timer.stop()
         self.mongo_client.close()
+
+    def cleanup(self):
+        self.close()
+
+    def refresh_channel_properties(self):
+        self.initialize_async()

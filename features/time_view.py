@@ -140,7 +140,7 @@ class TimeViewFeature:
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
 
-        colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', 'w', '#FF4500', '#32CD32', '#00CED1', '#FFD700', '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']
+        colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', 'b', '#FF4500', '#32CD32', '#00CED1', '#FFD700', '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']
         self.num_plots = self.total_channels
         for i in range(self.num_plots):
             plot_widget = PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')}, background='w')
@@ -358,6 +358,7 @@ class TimeViewFeature:
             if self.tacho_channels_count >= 1:
                 self.fifo_data[self.main_channels] = np.roll(self.fifo_data[self.main_channels], -self.samples_per_channel)
                 self.fifo_data[self.main_channels][-self.samples_per_channel:] = np.array(values[self.main_channels]) / 100
+                #tachooooo
                 self.needs_refresh[self.main_channels] = True
 
             if self.tacho_channels_count >= 2:
