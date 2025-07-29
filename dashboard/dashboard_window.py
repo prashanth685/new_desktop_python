@@ -55,6 +55,8 @@ class Worker(QObject):
 
 class DashboardWindow(QWidget):
     mqtt_status_changed = pyqtSignal(bool)
+    project_changed = pyqtSignal(str)
+    saving_state_changed = pyqtSignal(bool)
 
     def __init__(self, db, email, auth_window=None):
         super().__init__()
@@ -62,7 +64,7 @@ class DashboardWindow(QWidget):
         self.email = email
         self.auth_window = auth_window
         self.current_project = None
-        self.channel_count = None  # Store channel count for the current project
+        self.channel_count = None
         self.open_dashboards = {}
         self.current_feature = None
         self.mqtt_handler = None
@@ -140,9 +142,23 @@ class DashboardWindow(QWidget):
         main_layout.setSpacing(0)
         self.setLayout(main_layout)
         self.file_bar = FileBar(self)
+        self.file_bar.home_triggered.connect(self.display_dashboard)
+        self.file_bar.open_triggered.connect(self.open_project)
+        self.file_bar.edit_triggered.connect(self.edit_project_dialog)
+        self.file_bar.new_triggered.connect(self.create_project)
+        self.file_bar.save_triggered.connect(self.save_action)
+        self.file_bar.settings_triggered.connect(self.settings_action)
+        self.file_bar.refresh_triggered.connect(self.refresh_action)
+        self.file_bar.exit_triggered.connect(self.close)
         main_layout.addWidget(self.file_bar)
         self.tool_bar = ToolBar(self)
+        self.tool_bar.feature_selected.connect(self.display_feature_content)
         main_layout.addWidget(self.tool_bar)
+        self.sub_tool_bar = SubToolBar(self)
+        self.sub_tool_bar.start_saving_triggered.connect(self.start_saving)
+        self.sub_tool_bar.stop_saving_triggered.connect(self.stop_saving)
+        self.sub_tool_bar.connect_mqtt_triggered.connect(self.connect_mqtt)
+        self.sub_tool_bar.disconnect_mqtt_triggered.connect(self.disconnect_mqtt)
         central_widget = QWidget()
         central_layout = QVBoxLayout()
         central_layout.setContentsMargins(0, 0, 0, 0)
@@ -163,7 +179,6 @@ class DashboardWindow(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
         right_container.setLayout(right_layout)
-        self.sub_tool_bar = SubToolBar(self)
         self.sub_tool_bar.setVisible(False)
         right_layout.addWidget(self.sub_tool_bar)
         self.main_section = MainSection(self)
@@ -188,7 +203,6 @@ class DashboardWindow(QWidget):
         main_layout.addWidget(self.console_container)
 
     def deferred_initialization(self):
-        """Start deferred initialization in a separate QThread."""
         self.worker = Worker(self)
         self.thread = QThread()
         self.worker.moveToThread(self.thread)
@@ -205,6 +219,8 @@ class DashboardWindow(QWidget):
         self.sub_tool_bar.setVisible(False)
         self.current_project = None
         self.channel_count = None
+        self.file_bar.update_state(project_name=None)
+        self.project_changed.emit(None)
         self.setWindowTitle('Sarayu Desktop Application')
         self.select_project_widget = SelectProjectWidget(self)
         self.main_section.set_widget(self.select_project_widget)
@@ -235,8 +251,6 @@ class DashboardWindow(QWidget):
             logging.error(f"Project {project_name} not found!")
             self.display_select_project()
             return
-
-        # Convert channel_count to integer
         channel_count_map = {
             "DAQ4CH": 4,
             "DAQ8CH": 8,
@@ -254,7 +268,6 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"Error: Invalid channel count {raw_channel_count} for project {project_name}. Defaulting to 4.")
             logging.error(f"Invalid channel count {raw_channel_count} for project {project_name}: {str(e)}. Defaulting to 4.")
             self.channel_count = 4
-
         self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
         self.tree_view.setVisible(True)
         self.sub_tool_bar.setVisible(True)
@@ -271,6 +284,8 @@ class DashboardWindow(QWidget):
             self.project_structure_widget.setParent(None)
             self.project_structure_widget = None
         logging.debug("ProjectStructureWidget removed from MainSection")
+        self.file_bar.update_state(project_name=project_name)
+        self.project_changed.emit(project_name)
         self.load_project_features()
         QTimer.singleShot(0, self.setup_mqtt)
 
@@ -299,8 +314,6 @@ class DashboardWindow(QWidget):
             self.console.append_to_console(f"Failed to setup MQTT: {str(e)}")
             self.mqtt_connected = False
             self.mqtt_status_changed.emit(False)
-        self.sub_tool_bar.update_subtoolbar()
-        self.mqtt_status.update_mqtt_status_indicator()
 
     def cleanup_mqtt(self):
         if self.mqtt_handler:
@@ -351,30 +364,27 @@ class DashboardWindow(QWidget):
             self.cleanup_mqtt()
             self.mqtt_connected = False
             self.mqtt_status_changed.emit(False)
-            self.sub_tool_bar.update_subtoolbar()
-            self.mqtt_status.update_mqtt_status_indicator()
             logging.info(f"MQTT disconnected for project: {self.current_project}")
             self.console.append_to_console(f"MQTT disconnected for project: {self.current_project}")
         except Exception as e:
             logging.error(f"Failed to disconnect MQTT: {str(e)}")
             self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
-        self.mqtt_status.update_mqtt_status_indicator()
 
-    def on_data_received(self, feature_name, tag_name, model_name, values, sample_rate):
+    def on_data_received(self, feature_name, tag_name, model_name, channel_index, values, sample_rate):
         try:
-            if len(values) < self.channel_count:
-                self.console.append_to_console(f"Received {len(values)} channels, expected at least {self.channel_count}")
-                logging.warning(f"Received {len(values)} channels, expected at least {self.channel_count}")
-                return
             for key, feature_instance in self.feature_instances.items():
                 instance_feature, instance_model, instance_channel, _ = key
-                if instance_feature == feature_name and instance_model == model_name and hasattr(feature_instance, 'on_data_received'):
-                    QTimer.singleShot(0, lambda: self._update_feature(
-                        instance_feature, instance_model, instance_channel,
-                        feature_instance, tag_name, values, sample_rate
-                    ))
+                if (instance_feature == feature_name and instance_model == model_name and
+                    (instance_channel is None or channel_index == -1 or
+                     (instance_channel and f"Channel_{channel_index + 1}" == instance_channel))):
+                    if hasattr(feature_instance, 'on_data_received'):
+                        QTimer.singleShot(0, lambda: self._update_feature(
+                            instance_feature, instance_model, instance_channel,
+                            feature_instance, tag_name, values, sample_rate
+                        ))
+                        logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}")
         except Exception as e:
-            logging.error(f"Error in on_data_received for {feature_name}: {str(e)}")
+            logging.error(f"Error in on_data_received for {feature_name}/{model_name}/channel_{channel_index}: {str(e)}")
             self.console.append_to_console(f"Error processing data for {feature_name}: {str(e)}")
 
     def _update_feature(self, feature_name, model_name, channel, feature_instance, tag_name, values, sample_rate):
@@ -388,8 +398,6 @@ class DashboardWindow(QWidget):
         self.mqtt_connected = "Connected" in message
         self.mqtt_status_changed.emit(self.mqtt_connected)
         self.console.append_to_console(f"MQTT Status: {message}")
-        self.sub_tool_bar.update_subtoolbar()
-        self.mqtt_status.update_mqtt_status_indicator()
 
     def load_project_features(self):
         try:
@@ -429,14 +437,10 @@ class DashboardWindow(QWidget):
         if not self.current_project:
             QMessageBox.warning(self, "Error", "No project selected to edit!")
             return
-
-        # Fetch existing project data
         project_data = self.db.get_project_data(self.current_project)
         if not project_data:
             QMessageBox.warning(self, "Error", "Project data not found!")
             return
-
-        # Clear existing content and display CreateProjectWidget in edit mode
         self.clear_content_layout()
         self.tree_view.setVisible(False)
         self.sub_tool_bar.setVisible(False)
@@ -452,12 +456,9 @@ class DashboardWindow(QWidget):
         logging.debug(f"Opened CreateProjectWidget in edit mode for {self.current_project}")
 
     def handle_project_edited(self, new_project_name, updated_models, channel_count):
-        """Handle project edit submission from CreateProjectWidget."""
         try:
             if not self.db.is_connected():
                 self.db.reconnect()
-
-            # Validate channel counts based on DAQ type
             valid_channel_counts = {
                 "DAQ4CH": 4,
                 "DAQ8CH": 8,
@@ -472,12 +473,9 @@ class DashboardWindow(QWidget):
                 except (ValueError, TypeError):
                     QMessageBox.warning(self, "Error", f"Invalid channel count: {channel_count}")
                     return
-
-            # Validate that each model has the correct number of channels
             for model in updated_models:
                 if len(model.get("channels", [])) != required_channels:
                     model_channels = model.get("channels", [])
-                    # Adjust channels to match required count
                     if len(model_channels) < required_channels:
                         model_channels.extend([
                             {
@@ -496,23 +494,21 @@ class DashboardWindow(QWidget):
                     elif len(model_channels) > required_channels:
                         model_channels = model_channels[:required_channels]
                     model["channels"] = model_channels
-
             success, message = self.db.edit_project(self.current_project, new_project_name, updated_models, channel_count)
             if success:
                 self.current_project = new_project_name
                 self.channel_count = required_channels
                 self.setWindowTitle(f'Sarayu Desktop Application - {self.current_project.upper()}')
-                self.load_project(new_project_name)  # Reload project to refresh UI
-                self.tool_bar.update_toolbar()
-                self.sub_tool_bar.update_subtoolbar()
+                self.load_project(new_project_name)
                 if self.current_feature:
-                    self.display_feature_content(self.current_feature, self.current_project)
+                    self.display_feature_content(self.current_feature)
                 for key, instance in self.feature_instances.items():
                     if hasattr(instance, 'refresh_channel_properties'):
                         instance.refresh_channel_properties()
                 QMessageBox.information(self, "Success", message)
-                self.file_bar.update_file_bar()
-                self.display_select_project()  # Return to project selection after editing
+                self.file_bar.update_state(project_name=new_project_name)
+                self.project_changed.emit(new_project_name)
+                self.display_select_project()
                 self.console.append_to_console(f"Project updated: {new_project_name} with {required_channels} channels")
             else:
                 QMessageBox.warning(self, "Error", message)
@@ -526,29 +522,24 @@ class DashboardWindow(QWidget):
         if not selected_model or not selected_channel:
             QMessageBox.warning(self, "Error", "Please select a channel to edit!")
             return
-
         project_data = self.db.get_project_data(self.current_project)
         if not project_data:
             QMessageBox.warning(self, "Error", "Project data not found!")
             return
-
         model = next((m for m in project_data["models"] if m["name"] == selected_model), None)
         if not model:
             QMessageBox.warning(self, "Error", f"Model '{selected_model}' not found!")
             return
-
         channel = next((c for c in model["channels"] if c["channelName"] == selected_channel), None)
         if not channel:
             QMessageBox.warning(self, "Error", f"Channel '{selected_channel}' not found!")
             return
-
         properties = ["type", "sensitivity", "unit", "correctionValue", "gain", "unitType", "angle", "angleDirection", "shaft"]
         updated_properties = {}
         for prop in properties:
             value, ok = QInputDialog.getText(self, f"Edit {prop.capitalize()}", f"Enter new {prop.capitalize()} (current: {channel.get(prop, 'None')})")
             if ok and value:
                 updated_properties[prop] = value
-
         if updated_properties:
             success, message = self.db.update_channel_properties(self.current_project, selected_model, selected_channel, updated_properties)
             if success:
@@ -559,28 +550,6 @@ class DashboardWindow(QWidget):
                 self.load_project_features()
             else:
                 QMessageBox.warning(self, "Error", message)
-
-    def delete_project(self):
-        if not self.current_project:
-            QMessageBox.warning(self, "Error", "No project selected to delete!")
-            return
-        reply = QMessageBox.question(self, "Confirm Delete", f"Are you sure you want to delete {self.current_project}?",
-                                     QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
-            try:
-                if not self.db.is_connected():
-                    self.db.reconnect()
-                success, message = self.db.delete_project(self.current_project)
-                if success:
-                    if self.current_project in self.open_dashboards:
-                        del self.open_dashboards[self.current_project]
-                    self.display_select_project()
-                    QMessageBox.information(self, "Success", message)
-                else:
-                    QMessageBox.warning(self, "Error", message)
-            except Exception as e:
-                logging.error(f"Error deleting project: {str(e)}")
-                QMessageBox.warning(self, "Error", f"Error deleting project: {str(e)}")
 
     def start_saving(self):
         selected_model = self.tree_view.get_selected_model()
@@ -597,9 +566,8 @@ class DashboardWindow(QWidget):
             try:
                 feature_instance.start_saving()
                 self.is_saving = True
-                self.sub_tool_bar.update_subtoolbar()
+                self.saving_state_changed.emit(True)
                 logging.info("Started saving data from existing TimeViewFeature")
-                self.file_bar.update_file_bar()
             except Exception as e:
                 logging.error(f"Failed to start saving: {str(e)}")
                 QMessageBox.warning(self, "Error", f"Failed to start saving: {str(e)}")
@@ -615,9 +583,8 @@ class DashboardWindow(QWidget):
                 self.feature_instances[key] = feature_instance
                 feature_instance.start_saving()
                 self.is_saving = True
-                self.sub_tool_bar.update_subtoolbar()
+                self.saving_state_changed.emit(True)
                 logging.info(f"Created new TimeViewFeature for saving data, key: {key}")
-                self.file_bar.update_file_bar()
             except Exception as e:
                 logging.error(f"Failed to create and start saving with new TimeViewFeature: {str(e)}")
                 QMessageBox.warning(self, "Error", f"Failed to start saving: {str(e)}")
@@ -636,36 +603,38 @@ class DashboardWindow(QWidget):
         try:
             feature_instance.stop_saving()
             self.is_saving = False
-            self.sub_tool_bar.update_subtoolbar()
+            self.saving_state_changed.emit(False)
             logging.info("Stopped saving data from dashboard")
-            self.file_bar.update_file_bar()
         except Exception as e:
             logging.error(f"Failed to stop saving: {str(e)}")
             QMessageBox.warning(self, "Error", f"Failed to stop saving: {str(e)}")
 
-    def display_feature_content(self, feature_name, project_name):
+    def display_feature_content(self, feature_name):
         try:
-            logging.debug(f"Attempting to display feature: {feature_name} for project: {project_name} with channel_count: {self.channel_count}")
-            self.current_project = project_name
+            logging.debug(f"Attempting to display feature: {feature_name} for project: {self.current_project} with channel_count: {self.channel_count}")
+            if not self.current_project:
+                self.console.append_to_console(f"No project selected for {feature_name}.")
+                logging.warning(f"No project selected for {feature_name}")
+                return
             self.current_feature = feature_name
             self.is_saving = False
+            self.saving_state_changed.emit(False)
             self.sub_tool_bar.setVisible(True)
-            self.sub_tool_bar.update_subtoolbar()
             current_console_height = self.console.console_message_area.height()
             selected_model = self.tree_view.get_selected_model()
             if not selected_model:
                 self.console.append_to_console(f"Please select a model to view {feature_name}.")
                 logging.warning(f"No model selected for {feature_name}")
                 return
-            project_data = self.db.get_project_data(project_name)
+            project_data = self.db.get_project_data(self.current_project)
             if not project_data:
-                self.console.append_to_console(f"Project {project_name} not found in database.")
-                logging.error(f"Project {project_name} not found!")
+                self.console.append_to_console(f"Project {self.current_project} not found in database.")
+                logging.error(f"Project {self.current_project} not found!")
                 return
             model = next((m for m in project_data["models"] if m["name"] == selected_model), None)
             if not model:
-                self.console.append_to_console(f"Model {selected_model} not found in project {project_name}.")
-                logging.error(f"Model {selected_model} not found in project {project_name}!")
+                self.console.append_to_console(f"Model {selected_model} not found in project {self.current_project}.")
+                logging.error(f"Model {selected_model} not found in project {self.current_project}!")
                 return
             selected_channel = self.tree_view.get_selected_channel() if feature_name not in ["Time View", "Time Report"] else None
             channels = [selected_channel] if selected_channel and feature_name not in ["Time View", "Time Report"] else [None]
@@ -692,22 +661,16 @@ class DashboardWindow(QWidget):
                 logging.warning(f"Unknown feature: {feature_name}")
                 QMessageBox.warning(self, "Error", f"Unknown feature: {feature_name}")
                 return
-            # Validate channel_count before creating feature
-            if feature_name in ["Orbit", "FFT"] and not isinstance(self.channel_count, int):
-                self.console.append_to_console(f"Error: Invalid channel_count {self.channel_count} for {feature_name}. Defaulting to 4.")
-                logging.error(f"Invalid channel_count {self.channel_count} for {feature_name}. Defaulting to 4.")
-                self.channel_count = 4
             for channel in channels:
                 unique_id = int(time.time() * 1000)
                 key = (feature_name, selected_model, channel, unique_id)
                 try:
                     if not self.db.is_connected():
                         self.db.reconnect()
-                    # Pass channel_count to Orbit and FFT features
                     feature_kwargs = {
                         "parent": self,
                         "db": self.db,
-                        "project_name": project_name,
+                        "project_name": self.current_project,
                         "channel": channel,
                         "model_name": selected_model,
                         "console": self.console
@@ -715,7 +678,6 @@ class DashboardWindow(QWidget):
                     if feature_name in ["Orbit", "FFT"]:
                         feature_kwargs["channel_count"] = self.channel_count
                     feature_instance = feature_classes[feature_name](**feature_kwargs)
-                    # Update channel for Orbit and FFT features
                     if feature_name in ["Orbit", "FFT"] and channel and hasattr(feature_instance, 'update_selected_channel'):
                         feature_instance.update_selected_channel(channel)
                     self.feature_instances[key] = feature_instance
@@ -794,7 +756,7 @@ class DashboardWindow(QWidget):
                 if not any(k[0] == feature_name for k in self.feature_instances.keys()):
                     self.current_feature = None
                     self.is_saving = False
-                    self.sub_tool_bar.update_subtoolbar()
+                    self.saving_state_changed.emit(False)
                     logging.debug(f"Reset current_feature as no instances of {feature_name} remain")
             self.main_section.mdi_area.update()
             self.main_section.scroll_area.viewport().update()
@@ -816,7 +778,6 @@ class DashboardWindow(QWidget):
                     QMessageBox.information(self, "Save", f"Data for project '{self.current_project}' saved successfully!")
                 else:
                     QMessageBox.warning(self, "Save Error", "No data to save for the selected project!")
-                self.file_bar.update_file_bar()
             except Exception as e:
                 logging.error(f"Error saving project: {str(e)}")
                 QMessageBox.warning(self, "Error", f"Error saving project: {str(e)}")
@@ -826,12 +787,11 @@ class DashboardWindow(QWidget):
     def refresh_action(self):
         try:
             if self.current_project and self.current_feature:
-                self.display_feature_content(self.current_feature, self.current_project)
+                self.display_feature_content(self.current_feature)
                 QMessageBox.information(self, "Refresh", f"Refreshed view for '{self.current_feature}'!")
             else:
                 self.display_select_project()
                 QMessageBox.information(self, "Refresh", "Refreshed project selection view!")
-            self.file_bar.update_file_bar()
         except Exception as e:
             logging.error(f"Error refreshing view: {str(e)}")
             QMessageBox.warning(self, "Error", f"Error refreshing view: {str(e)}")
@@ -842,8 +802,7 @@ class DashboardWindow(QWidget):
             return
         self.current_feature = None
         self.is_saving = False
-        self.sub_tool_bar.update_subtoolbar()
-        self.file_bar.update_file_bar()
+        self.saving_state_changed.emit(False)
 
     def clear_content_layout(self):
         try:
@@ -889,7 +848,6 @@ class DashboardWindow(QWidget):
 
     def settings_action(self):
         QMessageBox.information(self, "Settings", "Settings functionality not implemented yet.")
-        self.file_bar.update_file_bar()
 
     def back_to_login(self):
         try:

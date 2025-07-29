@@ -75,30 +75,106 @@ class TimeViewFeature:
         self.widget = QWidget()
         main_layout = QVBoxLayout()
 
+        # Top layout with settings button on the right
         top_layout = QHBoxLayout()
-        self.settings_button = QPushButton("Settings")
-        self.settings_button.setIcon(QIcon("settings_icon.png"))
+        top_layout.addStretch()  # Push button to the right
+        self.settings_button = QPushButton("⚙️ Settings")
+        self.settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 120px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+        """)
         self.settings_button.clicked.connect(self.toggle_settings)
         top_layout.addWidget(self.settings_button)
-        top_layout.addStretch()
         main_layout.addLayout(top_layout)
 
+        # Settings panel with improved styling
         self.settings_panel = QWidget()
+        self.settings_panel.setStyleSheet("""
+            QWidget {
+                background-color: #f5f5f5;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                padding: 10px;
+            }
+        """)
         self.settings_panel.setVisible(False)
         settings_layout = QGridLayout()
+        settings_layout.setSpacing(10)
         self.settings_panel.setLayout(settings_layout)
 
-        settings_layout.addWidget(QLabel("Window Size (seconds)"), 0, 0)
+        # Window size selection
+        window_label = QLabel("Window Size (seconds)")
+        window_label.setStyleSheet("font-size: 14px;")
+        settings_layout.addWidget(window_label, 0, 0)
         window_combo = QComboBox()
         window_combo.addItems([str(i) for i in range(1, 11)])
         window_combo.setCurrentText(str(self.window_seconds))
+        window_combo.setStyleSheet("""
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #d0d0d0;
+                border-radius: 4px;
+                background-color: white;
+                min-width: 100px;
+            }
+        """)
         settings_layout.addWidget(window_combo, 0, 1)
         self.settings_widgets = {"WindowSeconds": window_combo}
 
+        # Save and Close buttons with improved styling
         save_button = QPushButton("Save")
+        save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #1e88e5;
+            }
+            QPushButton:pressed {
+                background-color: #1976d2;
+            }
+        """)
         save_button.clicked.connect(self.save_settings)
+        
         close_button = QPushButton("Close")
+        close_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                font-size: 14px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #e53935;
+            }
+            QPushButton:pressed {
+                background-color: #d32f2f;
+            }
+        """)
         close_button.clicked.connect(self.close_settings)
+        
         settings_layout.addWidget(save_button, 1, 0)
         settings_layout.addWidget(close_button, 1, 1)
 
@@ -358,7 +434,6 @@ class TimeViewFeature:
             if self.tacho_channels_count >= 1:
                 self.fifo_data[self.main_channels] = np.roll(self.fifo_data[self.main_channels], -self.samples_per_channel)
                 self.fifo_data[self.main_channels][-self.samples_per_channel:] = np.array(values[self.main_channels]) / 100
-                #tachooooo
                 self.needs_refresh[self.main_channels] = True
 
             if self.tacho_channels_count >= 2:

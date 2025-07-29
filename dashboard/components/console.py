@@ -6,25 +6,19 @@ class Console(QWidget):
         super().__init__(parent)
         self.parent = parent
         self.initUI()
-        self.minimize_console()  # Set initial state to minimized
+        self.minimize_console()
 
     def initUI(self):
         self.button_container = QWidget()
         self.button_container.setFixedHeight(40)
-        self.button_container.setStyleSheet("""
-            QWidget {
-                background-color: #0c0c0f;
-            }
-        """)
+        self.button_container.setStyleSheet("background-color: #0c0c0f;")
         button_layout = QHBoxLayout()
         button_layout.setContentsMargins(5, 0, 5, 0)
         button_layout.setSpacing(5)
         self.button_container.setLayout(button_layout)
-
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         button_layout.addWidget(spacer)
-
         self.minimize_button = QPushButton("-")
         self.minimize_button.setToolTip("Minimize Console")
         self.minimize_button.clicked.connect(self.minimize_console)
@@ -41,7 +35,6 @@ class Console(QWidget):
             QPushButton:pressed { background-color: #357abd; }
         """)
         button_layout.addWidget(self.minimize_button)
-
         self.maximize_button = QPushButton("🗖")
         self.maximize_button.setToolTip("Maximize Console")
         self.maximize_button.clicked.connect(self.maximize_console)
@@ -58,7 +51,6 @@ class Console(QWidget):
             QPushButton:pressed { background-color: #357abd; }
         """)
         button_layout.addWidget(self.maximize_button)
-
         self.console_message_area = QTextEdit()
         self.console_message_area.setReadOnly(True)
         self.console_message_area.setFixedHeight(200)
@@ -72,8 +64,6 @@ class Console(QWidget):
                 padding: 10px; 
             }
         """)
-
-        # Initial button visibility
         self.maximize_button.show()
         self.minimize_button.hide()
 
@@ -95,20 +85,16 @@ class Console(QWidget):
         try:
             self.console_message_area.setFixedHeight(0)
             self.console_message_area.hide()
-
             layout = self.parent.console_layout
             layout.removeWidget(self.button_container)
             layout.removeWidget(self.console_message_area)
             layout.removeWidget(self.parent.mqtt_status)
-
             layout.addWidget(self.button_container)
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
-
             self.minimize_button.hide()
             self.maximize_button.show()
-
-            self.parent.console_container.setFixedHeight(80)  # 40 (button) + 40 (MQTT)
+            self.parent.console_container.setFixedHeight(80)
             logging.info("Console minimized")
         except Exception as e:
             logging.error(f"Error minimizing console: {str(e)}")
@@ -117,21 +103,16 @@ class Console(QWidget):
         try:
             self.console_message_area.setFixedHeight(200)
             self.console_message_area.show()
-
             layout = self.parent.console_layout
             layout.removeWidget(self.button_container)
             layout.removeWidget(self.console_message_area)
             layout.removeWidget(self.parent.mqtt_status)
-
             layout.addWidget(self.button_container)
             layout.addWidget(self.console_message_area)
             layout.addWidget(self.parent.mqtt_status)
-
             self.minimize_button.show()
             self.maximize_button.hide()
-
-            self.parent.console_container.setFixedHeight(200)  
+            self.parent.console_container.setFixedHeight(200)
             logging.info("Console maximized")
         except Exception as e:
             logging.error(f"Error maximizing console: {str(e)}")
-

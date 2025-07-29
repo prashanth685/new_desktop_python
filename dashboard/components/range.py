@@ -1,74 +1,35 @@
-from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QSpinBox, QPushButton, QMessageBox
+from PyQt5.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton, QSlider
 from PyQt5.QtCore import Qt, pyqtSignal
 import logging
 import datetime
 
-class RangeDialog(QDialog):
-    features_selected = pyqtSignal(str, str)
-
-    def __init__(self, parent, db, project_name, model_name, filename):
+class FrequencyWindow(QDialog):
+    def __init__(self, parent=None, project_name=None, model_name=None, filename=None, start_time=None, end_time=None):
         super().__init__(parent)
-        self.db = db
+        self.setWindowTitle("Frequency Window")
+        self.setFixedSize(400, 300)
         self.project_name = project_name
         self.model_name = model_name
         self.filename = filename
-        self.setWindowTitle("Select Frame Range")
-        self.setFixedSize(400, 300)
+        self.start_time = start_time
+        self.end_time = end_time
         self.initUI()
-        self.load_file_info()
 
     def initUI(self):
         layout = QVBoxLayout()
-        layout.setSpacing(10)
         layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
 
-        self.filename_label = QLabel(f"File: {self.filename}")
-        self.filename_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
-        layout.addWidget(self.filename_label)
+        title = QLabel(f"Frequency Analysis for {self.filename}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        layout.addWidget(title)
 
-        self.start_time_label = QLabel("Start Time: Loading...")
-        self.start_time_label.setStyleSheet("font-size: 14px; color: #333;")
-        layout.addWidget(self.start_time_label)
+        time_label = QLabel(f"Selected Range: {self.start_time} to {self.end_time}")
+        time_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(time_label)
 
-        self.end_time_label = QLabel("End Time: Loading...")
-        self.end_time_label.setStyleSheet("font-size: 14px; color: #333;")
-        layout.addWidget(self.end_time_label)
-
-        self.start_frame_label = QLabel("Start Frame Index:")
-        self.start_frame_label.setStyleSheet("font-size: 14px; color: #333;")
-        layout.addWidget(self.start_frame_label)
-
-        self.start_frame_spin = QSpinBox()
-        self.start_frame_spin.setRange(0, 0)
-        self.start_frame_spin.setStyleSheet("""
-            QSpinBox {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #90caf9;
-                border-radius: 4px;
-            }
-        """)
-        layout.addWidget(self.start_frame_spin)
-
-        self.end_frame_label = QLabel("End Frame Index:")
-        self.end_frame_label.setStyleSheet("font-size: 14px; color: #333;")
-        layout.addWidget(self.end_frame_label)
-
-        self.end_frame_spin = QSpinBox()
-        self.end_frame_spin.setRange(0, 0)
-        self.end_frame_spin.setStyleSheet("""
-            QSpinBox {
-                font-size: 14px;
-                padding: 5px;
-                border: 1px solid #90caf9;
-                border-radius: 4px;
-            }
-        """)
-        layout.addWidget(self.end_frame_spin)
-
-        button_layout = QVBoxLayout()
-        self.ok_button = QPushButton("OK")
-        self.ok_button.setStyleSheet("""
+        frame_button = QPushButton("Open Frame Index Window")
+        frame_button.setStyleSheet("""
             QPushButton {
                 background-color: #4a90e2;
                 color: white;
@@ -77,109 +38,151 @@ class RangeDialog(QDialog):
                 border-radius: 5px;
                 font-size: 14px;
             }
-            QPushButton:hover {
-                background-color: #357abd;
-            }
-            QPushButton:pressed {
-                background-color: #2c5d9b;
-            }
+            QPushButton:hover { background-color: #357abd; }
+            QPushButton:pressed { background-color: #2c5d9b; }
         """)
-        self.ok_button.clicked.connect(self.on_ok_clicked)
-        button_layout.addWidget(self.ok_button)
+        frame_button.clicked.connect(self.open_frame_index_window)
+        layout.addWidget(frame_button)
 
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.setStyleSheet("""
+        layout.addStretch()
+        self.setLayout(layout)
+
+    def open_frame_index_window(self):
+        frame_window = FrameIndexWindow(
+            self, self.project_name, self.model_name, self.filename, self.start_time, self.end_time
+        )
+        frame_window.show()
+
+class FrameIndexWindow(QDialog):
+    def __init__(self, parent=None, project_name=None, model_name=None, filename=None, start_time=None, end_time=None):
+        super().__init__(parent)
+        self.setWindowTitle("Frame Index Window")
+        self.setFixedSize(400, 300)
+        self.project_name = project_name
+        self.model_name = model_name
+        self.filename = filename
+        self.start_time = start_time
+        self.end_time = end_time
+        self.initUI()
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Frame Indices for {self.filename}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        layout.addWidget(title)
+
+        time_label = QLabel(f"Time Range: {self.start_time} to {self.end_time}")
+        time_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(time_label)
+
+        # Placeholder for frame index display
+        frame_label = QLabel("Frame indices would be listed here")
+        frame_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(frame_label)
+
+        layout.addStretch()
+        self.setLayout(layout)
+
+class RangeDialog(QDialog):
+    time_range_selected = pyqtSignal(str, str)
+
+    def __init__(self, parent=None, project_name=None, model_name=None, filename=None, start_time=None, end_time=None):
+        super().__init__(parent)
+        self.setWindowTitle("Select Time Range")
+        self.setFixedSize(500, 300)
+        self.project_name = project_name
+        self.model_name = model_name
+        self.filename = filename
+        self.start_time = start_time
+        self.end_time = end_time
+        self.start_timestamp = self.parse_time(start_time) if start_time else 0
+        self.end_timestamp = self.parse_time(end_time) if end_time else 0
+        self.initUI()
+
+    def parse_time(self, time_str):
+        try:
+            return datetime.datetime.fromisoformat(time_str.replace('Z', '+00:00')).timestamp()
+        except Exception as e:
+            logging.error(f"Error parsing time {time_str}: {str(e)}")
+            return 0
+
+    def initUI(self):
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        title = QLabel(f"Select Time Range for {self.filename}")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        layout.addWidget(title)
+
+        time_range_label = QLabel(f"Available Range: {self.start_time} to {self.end_time}")
+        time_range_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(time_range_label)
+
+        self.start_slider = QSlider(Qt.Horizontal)
+        self.start_slider.setMinimum(0)
+        self.start_slider.setMaximum(100)
+        self.start_slider.setValue(0)
+        self.start_slider.valueChanged.connect(self.update_labels)
+        layout.addWidget(QLabel("Start Time:"))
+        layout.addWidget(self.start_slider)
+
+        self.end_slider = QSlider(Qt.Horizontal)
+        self.end_slider.setMinimum(0)
+        self.end_slider.setMaximum(100)
+        self.end_slider.setValue(100)
+        self.end_slider.valueChanged.connect(self.update_labels)
+        layout.addWidget(QLabel("End Time:"))
+        layout.addWidget(self.end_slider)
+
+        self.start_label = QLabel("Start: " + self.start_time)
+        self.start_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(self.start_label)
+
+        self.end_label = QLabel("End: " + self.end_time)
+        self.end_label.setStyleSheet("font-size: 14px; color: #333;")
+        layout.addWidget(self.end_label)
+
+        confirm_button = QPushButton("Confirm")
+        confirm_button.setStyleSheet("""
             QPushButton {
-                background-color: #ef5350;
+                background-color: #4a90e2;
                 color: white;
                 border: none;
                 padding: 8px 16px;
                 border-radius: 5px;
                 font-size: 14px;
             }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:pressed {
-                background-color: #b71c1c;
-            }
+            QPushButton:hover { background-color: #357abd; }
+            QPushButton:pressed { background-color: #2c5d9b; }
         """)
-        self.cancel_button.clicked.connect(self.reject)
-        button_layout.addWidget(self.cancel_button)
+        confirm_button.clicked.connect(self.confirm_selection)
+        layout.addWidget(confirm_button)
 
-        layout.addLayout(button_layout)
+        layout.addStretch()
         self.setLayout(layout)
 
-    def load_file_info(self):
-        try:
-            if not self.db.is_connected():
-                self.db.reconnect()
-            messages = self.db.get_timeview_messages(self.project_name, self.model_name, filename=self.filename)
-            if not messages:
-                logging.warning(f"No messages found for file {self.filename} in project {self.project_name}/{self.model_name}")
-                self.start_time_label.setText("Start Time: Not available")
-                self.end_time_label.setText("End Time: Not available")
-                self.start_frame_spin.setEnabled(False)
-                self.end_frame_spin.setEnabled(False)
-                self.ok_button.setEnabled(False)
-                return
+    def update_labels(self):
+        total_duration = self.end_timestamp - self.start_timestamp
+        start_value = self.start_slider.value() / 100.0
+        end_value = self.end_slider.value() / 100.0
+        start_ts = self.start_timestamp + (total_duration * start_value)
+        end_ts = self.start_timestamp + (total_duration * end_value)
+        start_time_str = datetime.datetime.fromtimestamp(start_ts).isoformat()
+        end_time_str = datetime.datetime.fromtimestamp(end_ts).isoformat()
+        self.start_label.setText(f"Start: {start_time_str}")
+        self.end_label.setText(f"End: {end_time_str}")
 
-            frame_indices = [msg["frameIndex"] for msg in messages]
-            timestamps = [msg["createdAt"] for msg in messages]
-            if frame_indices and timestamps:
-                min_frame = min(frame_indices)
-                max_frame = max(frame_indices)
-                min_time = min(timestamps)
-                max_time = max(timestamps)
-                try:
-                    start_dt = datetime.datetime.fromisoformat(min_time.replace('Z', '+00:00'))
-                    end_dt = datetime.datetime.fromisoformat(max_time.replace('Z', '+00:00'))
-                    self.start_time_label.setText(f"Start Time: {start_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                    self.end_time_label.setText(f"End Time: {end_dt.strftime('%Y-%m-%d %H:%M:%S')}")
-                    self.start_frame_spin.setRange(min_frame, max_frame)
-                    self.start_frame_spin.setValue(min_frame)
-                    self.end_frame_spin.setRange(min_frame, max_frame)
-                    self.end_frame_spin.setValue(max_frame)
-                except ValueError as e:
-                    logging.error(f"Error parsing timestamps: {e}")
-                    self.start_time_label.setText("Start Time: Invalid format")
-                    self.end_time_label.setText("End Time: Invalid format")
-                    self.start_frame_spin.setEnabled(False)
-                    self.end_frame_spin.setEnabled(False)
-                    self.ok_button.setEnabled(False)
-            else:
-                self.start_time_label.setText("Start Time: Not available")
-                self.end_time_label.setText("End Time: Not available")
-                self.start_frame_spin.setEnabled(False)
-                self.end_frame_spin.setEnabled(False)
-                self.ok_button.setEnabled(False)
-        except Exception as e:
-            logging.error(f"Error loading file info for {self.filename}: {e}")
-            self.start_time_label.setText("Start Time: Error")
-            self.end_time_label.setText("End Time: Error")
-            self.start_frame_spin.setEnabled(False)
-            self.end_frame_spin.setEnabled(False)
-            self.ok_button.setEnabled(False)
-
-    def on_ok_clicked(self):
-        start_frame = self.start_frame_spin.value()
-        end_frame = self.end_frame_spin.value()
-        if start_frame > end_frame:
-            QMessageBox.warning(self, "Error", "Start frame index cannot be greater than end frame index!")
-            return
-
-        try:
-            if not self.db.is_connected():
-                self.db.reconnect()
-            # Update feature instances to use the selected frame range
-            for feature_name in [
-                "Tabular View", "Time View", "Time Report", "FFT", "Waterfall",
-                "Centerline", "Orbit", "Trend View", "Multiple Trend View",
-                "Bode Plot", "History Plot", "Polar Plot", "Report"
-            ]:
-                self.features_selected.emit(feature_name, self.project_name)
-            logging.info(f"Selected frame range {start_frame} to {end_frame} for file {self.filename}")
-            self.accept()
-        except Exception as e:
-            logging.error(f"Error processing selected frame range: {e}")
-            QMessageBox.warning(self, "Error", f"Failed to open features: {str(e)}")
+    def confirm_selection(self):
+        total_duration = self.end_timestamp - self.start_timestamp
+        start_value = self.start_slider.value() / 100.0
+        end_value = self.end_slider.value() / 100.0
+        start_ts = self.start_timestamp + (total_duration * start_value)
+        end_ts = self.start_timestamp + (total_duration * end_value)
+        start_time_str = datetime.datetime.fromtimestamp(start_ts).isoformat()
+        end_time_str = datetime.datetime.fromtimestamp(end_ts).isoformat()
+        self.time_range_selected.emit(start_time_str, end_time_str)
+        self.accept()

@@ -11,8 +11,8 @@ from collections import defaultdict
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class MQTTHandler(QObject):
-    # Modified signal to include feature_name
-    data_received = pyqtSignal(str, str, str, list, int)  # feature_name, tag_name, model_name, values, sample_rate
+    # Signal now includes channel index for precise data delivery
+    data_received = pyqtSignal(str, str, str, int, list, int)  # feature_name, tag_name, model_name, channel_index, values, sample_rate
     connection_status = pyqtSignal(str)
 
     def __init__(self, db, project_name, broker="192.168.1.238", port=1883):
@@ -25,9 +25,10 @@ class MQTTHandler(QObject):
         self.connected = False
         self.subscribed_topics = []
         self.data_queue = queue.Queue()
-        self.batch_interval_ms = 100  # Batch data every 100ms
+        self.batch_interval_ms = 50  # Reduced for faster processing
         self.processing_thread = None
         self.running = False
+        self.channel_counts = {}  # Cache channel counts per project
         self.feature_mapping = {
             "Tabular View": ["TabularView"],
             "Time View": ["TimeWave", "TimeReport"],
@@ -47,15 +48,33 @@ class MQTTHandler(QObject):
 
     def parse_topic(self, topic):
         try:
+            if not self.db.is_connected():
+                self.db.reconnect()
             tag_name = topic
             project_data = self.db.get_project_data(self.project_name)
+            if not project_data or "models" not in project_data:
+                logging.error(f"No valid project data for {self.project_name}")
+                return None, None, None
             model_name = None
-            if project_data and "models" in project_data:
-                for model in project_data["models"]:
-                    if model.get("tagName") == topic:
-                        model_name = model.get("name")
-                        break
-            logging.debug(f"Parsed topic {topic}: project_name={self.project_name}, model_name={model_name}, tag_name={tag_name}")
+            for model in project_data["models"]:
+                if model.get("tagName") == topic:
+                    model_name = model.get("name")
+                    break
+            if not model_name:
+                logging.warning(f"No model found for topic {topic} in project {self.project_name}")
+                return None, None, None
+            # Cache channel count
+            channel_count_map = {"DAQ4CH": 4, "DAQ8CH": 8, "DAQ10CH": 10}
+            raw_channel_count = project_data.get("channel_count", 4)
+            try:
+                channel_count = channel_count_map.get(raw_channel_count, int(raw_channel_count))
+                if channel_count not in [4, 8, 10]:
+                    raise ValueError(f"Invalid channel count: {channel_count}")
+            except (ValueError, TypeError) as e:
+                logging.error(f"Invalid channel count {raw_channel_count}: {str(e)}. Defaulting to 4.")
+                channel_count = 4
+            self.channel_counts[self.project_name] = channel_count
+            logging.debug(f"Parsed topic {topic}: project_name={self.project_name}, model_name={model_name}, tag_name={tag_name}, channels={channel_count}")
             return self.project_name, model_name, tag_name
         except Exception as e:
             logging.error(f"Error parsing topic {topic}: {str(e)}")
@@ -76,12 +95,14 @@ class MQTTHandler(QObject):
         self.connected = False
         self.connection_status.emit("Disconnected from MQTT Broker")
         logging.info("Disconnected from MQTT Broker")
+        self.subscribed_topics = []
 
     def on_message(self, client, userdata, msg):
         try:
             topic = msg.topic
             payload = msg.payload
-            self.data_queue.put((topic, payload))
+            self.data_queue.put((topic, payload, datetime.now()))
+            logging.debug(f"Queued message for topic {topic}, payload size: {len(payload)} bytes")
         except Exception as e:
             logging.error(f"Error queuing MQTT message: {str(e)}")
 
@@ -93,8 +114,8 @@ class MQTTHandler(QObject):
                 start_time = datetime.now()
                 while (datetime.now() - start_time).total_seconds() * 1000 < self.batch_interval_ms:
                     try:
-                        topic, payload = self.data_queue.get(timeout=0.01)
-                        batch[topic].append(payload)
+                        topic, payload, timestamp = self.data_queue.get(timeout=0.01)
+                        batch[topic].append((payload, timestamp))
                     except queue.Empty:
                         continue
 
@@ -105,7 +126,8 @@ class MQTTHandler(QObject):
                         logging.warning(f"Skipping invalid topic: {topic}")
                         continue
 
-                    for payload in payloads:
+                    channel_count = self.channel_counts.get(self.project_name, 4)
+                    for payload, _ in payloads:
                         try:
                             # Try JSON decode first
                             try:
@@ -113,11 +135,10 @@ class MQTTHandler(QObject):
                                 data = json.loads(payload_str)
                                 values = data.get("values", [])
                                 sample_rate = data.get("sample_rate", 1000)
-                                if not isinstance(values, list) or not values:
-                                    logging.warning(f"Invalid JSON payload format: {payload_str}")
+                                if not isinstance(values, list) or len(values) < channel_count:
+                                    logging.warning(f"Invalid JSON payload format or insufficient channels: {len(values)}/{channel_count}")
                                     continue
-                                num_channels = len(values)
-                                logging.debug(f"Parsed JSON payload: {num_channels} channels")
+                                logging.debug(f"Parsed JSON payload: {len(values)} channels")
                             except (UnicodeDecodeError, json.JSONDecodeError):
                                 payload_length = len(payload)
                                 if payload_length < 20 or payload_length % 2 != 0:
@@ -144,18 +165,17 @@ class MQTTHandler(QObject):
                                 samples_per_channel = (len(total_values) // total_channels) if total_values else 0
 
                                 if main_channels <= 0 or sample_rate <= 0 or tacho_channels_count <= 0 or samples_per_channel <= 0:
-                                    logging.error(f"Invalid header values: main_channels={main_channels}, sample_rate={sample_rate}, "
+                                    logging.error(f"Invalid header: main_channels={main_channels}, sample_rate={sample_rate}, "
                                                  f"tacho_channels_count={tacho_channels_count}, samples_per_channel={samples_per_channel}")
                                     continue
 
-                                expected_total = samples_per_channel * total_channels
-                                if len(total_values) != expected_total:
-                                    logging.warning(f"Unexpected data length: got {len(total_values)}, expected {expected_total}")
+                                if len(total_values) != samples_per_channel * total_channels:
+                                    logging.warning(f"Unexpected data length: got {len(total_values)}, expected {samples_per_channel * total_channels}")
                                     continue
 
+                                # Segregate main and tacho data
                                 main_data = total_values[:samples_per_channel * main_channels]
                                 tacho_data = total_values[samples_per_channel * main_channels:]
-
                                 channel_data = [[] for _ in range(main_channels)]
                                 for i in range(0, len(main_data), main_channels):
                                     for ch in range(main_channels):
@@ -163,20 +183,33 @@ class MQTTHandler(QObject):
 
                                 tacho_freq_data = tacho_data[:samples_per_channel] if tacho_channels_count >= 1 else []
                                 tacho_trigger_data = tacho_data[samples_per_channel:2 * samples_per_channel] if tacho_channels_count >= 2 else []
-
                                 values = [[float(v) for v in ch] for ch in channel_data]
                                 if tacho_freq_data:
                                     values.append([float(v) for v in tacho_freq_data])
                                 if tacho_trigger_data:
                                     values.append([float(v) for v in tacho_trigger_data])
-
                                 logging.debug(f"Parsed binary payload: main_channels={main_channels}, total_channels={total_channels}, "
                                              f"samples_per_channel={samples_per_channel}")
 
-                            # Emit data for each feature
+                            # Segregate and emit data per channel for each feature
                             for feature_name, _ in self.feature_mapping.items():
-                                self.data_received.emit(feature_name, tag_name, model_name, values, sample_rate)
-                                logging.debug(f"Emitted data for {feature_name}/{tag_name}/{model_name}: {len(values)} channels, sample_rate={sample_rate}")
+                                # Handle features that need specific channels
+                                if feature_name in ["Orbit", "FFT"]:
+                                    # Orbit and FFT may require paired channels or specific channel data
+                                    for ch_idx in range(min(channel_count, len(values))):
+                                        channel_values = values[ch_idx] if ch_idx < len(values) else []
+                                        self.data_received.emit(feature_name, tag_name, model_name, ch_idx, channel_values, sample_rate)
+                                        logging.debug(f"Emitted for {feature_name}/{tag_name}/{model_name}/channel_{ch_idx}: {len(channel_values)} samples")
+                                elif feature_name in ["Time View", "Time Report"]:
+                                    # Time View and Time Report use all channels
+                                    self.data_received.emit(feature_name, tag_name, model_name, -1, values, sample_rate)
+                                    logging.debug(f"Emitted for {feature_name}/{tag_name}/{model_name}/all_channels: {len(values)} channels")
+                                else:
+                                    # Other features typically use single channel or all channels
+                                    for ch_idx in range(min(channel_count, len(values))):
+                                        channel_values = values[ch_idx] if ch_idx < len(values) else []
+                                        self.data_received.emit(feature_name, tag_name, model_name, ch_idx, channel_values, sample_rate)
+                                        logging.debug(f"Emitted for {feature_name}/{tag_name}/{model_name}/channel_{ch_idx}: {len(channel_values)} samples")
 
                         except Exception as e:
                             logging.error(f"Error processing payload for topic {topic}: {str(e)}")
@@ -184,9 +217,12 @@ class MQTTHandler(QObject):
                 batch.clear()  # Clear batch for next iteration
             except Exception as e:
                 logging.error(f"Error in data processing loop: {str(e)}")
+                self.connection_status.emit(f"Data processing error: {str(e)}")
 
     def subscribe_to_topics(self):
         try:
+            if not self.db.is_connected():
+                self.db.reconnect()
             project_data = self.db.get_project_data(self.project_name)
             for model in project_data.get("models", []):
                 tag_name = model.get("tagName", "")
