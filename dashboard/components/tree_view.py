@@ -6,6 +6,7 @@ import logging
 class TreeView(QWidget):
     model_selected = pyqtSignal(str)
     channel_selected = pyqtSignal(str, str)
+    feature_requested = pyqtSignal(str, str, str)  # feature_name, model_name, channel_name
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -128,12 +129,15 @@ class TreeView(QWidget):
                 item.setBackground(0, QColor("#4a90e2"))
                 self.model_selected.emit(self.selected_model)
             elif data["type"] == "channel":
-                self.selected_channel = data["name"]
+                self.selected_channel = data["channel_name"]  # Use channel_name instead of name
                 self.selected_channel_item = item
                 self.selected_model = data["model"]
                 item.setBackground(0, QColor("#28a745"))
                 self.channel_selected.emit(self.selected_model, self.selected_channel)
-            self.console_message(f"Selected: {data['type']} - {data.get('name', 'Unknown')}")
+                # Trigger feature display for the current feature if set
+                if hasattr(self.parent_widget, 'current_feature') and self.parent_widget.current_feature:
+                    self.feature_requested.emit(self.parent_widget.current_feature, self.selected_model, self.selected_channel)
+            self.console_message(f"Selected: {data['type']} - {data.get('channel_name', data.get('name', 'Unknown'))}")
         except Exception as e:
             logging.error(f"Error handling tree item click: {str(e)}")
             self.console_message(f"Error handling tree item click: {str(e)}")

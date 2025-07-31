@@ -1,6 +1,6 @@
 from PyQt5.QtWidgets import (
     QToolBar, QAction, QWidget, QHBoxLayout, QSizePolicy, QLineEdit,
-    QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout
+    QLabel, QDialog, QVBoxLayout, QPushButton, QGridLayout, QComboBox
 )
 from PyQt5.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon
@@ -73,6 +73,7 @@ class SubToolBar(QWidget):
     connect_mqtt_triggered = pyqtSignal()
     disconnect_mqtt_triggered = pyqtSignal()
     layout_selected = pyqtSignal(str)
+    open_file_triggered = pyqtSignal(str)
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -81,6 +82,8 @@ class SubToolBar(QWidget):
         self.filename_edit = None
         self.saving_indicator = None
         self.timer_label = None
+        self.files_combo = None
+        self.open_action = None
         self.blink_timer = QTimer(self)
         self.blink_timer.timeout.connect(self.toggle_saving_indicator)
         self.blink_state = False
@@ -94,6 +97,8 @@ class SubToolBar(QWidget):
         self.parent.mqtt_status_changed.connect(self.update_mqtt_status)
         self.parent.project_changed.connect(self.update_project_status)
         self.parent.saving_state_changed.connect(self.update_saving_state)
+        self.stop_saving_triggered.connect(self.schedule_files_combo_update)
+        logging.debug("SubToolBar: Initialized with signal connections")
 
     def initUI(self):
         self.setStyleSheet("background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #eceff1, stop:1 #cfd8dc);")
@@ -164,13 +169,74 @@ class SubToolBar(QWidget):
     def update_mqtt_status(self, connected):
         self.mqtt_connected = connected
         self.update_subtoolbar()
+        self.schedule_files_combo_update()
         logging.debug(f"SubToolBar: Updated MQTT status to {connected}")
 
     def update_project_status(self, project_name):
         self.current_project = project_name
         self.refresh_filename()
+        self.schedule_files_combo_update()
         self.update_subtoolbar()
         logging.debug(f"SubToolBar: Updated project to {project_name}")
+
+    def schedule_files_combo_update(self):
+        """Schedule an update for the files combo with a slight delay to ensure DB commit."""
+        QTimer.singleShot(1000, self.update_files_combo)  # Increased delay to 1000ms
+        logging.debug("SubToolBar: Scheduled files combo update")
+
+    def update_files_combo(self):
+        if not self.files_combo:
+            logging.debug("SubToolBar: Files combo not initialized yet")
+            return
+        self.files_combo.clear()
+        try:
+            if not self.current_project:
+                self.files_combo.addItem("No project selected")
+                self.files_combo.setEnabled(False)
+                self.open_action.setEnabled(False)
+                logging.debug("SubToolBar: No project selected, disabled files combo")
+                return
+
+            if not self.parent.db.is_connected():
+                self.parent.db.reconnect()
+                logging.debug("SubToolBar: Reconnected to database")
+
+            model_name = self.parent.tree_view.get_selected_model()
+            if not model_name:
+                self.files_combo.addItem("No model selected")
+                self.files_combo.setEnabled(False)
+                self.open_action.setEnabled(False)
+                logging.debug("SubToolBar: No model selected, disabled files combo")
+                return
+
+            # Retry fetching filenames up to 5 times with increasing delay
+            for attempt in range(5):
+                filenames = self.parent.db.get_distinct_filenames(self.current_project, model_name)
+                if filenames:
+                    break
+                logging.debug(f"SubToolBar: Attempt {attempt + 1} failed to retrieve filenames, retrying after {0.2 * (attempt + 1)}s...")
+                time.sleep(0.2 * (attempt + 1))  # Exponential backoff: 0.2s, 0.4s, 0.6s, 0.8s, 1.0s
+            else:
+                self.files_combo.addItem("No files available")
+                self.files_combo.setEnabled(False)
+                self.open_action.setEnabled(False)
+                logging.debug("SubToolBar: No filenames found after retries, disabled files combo")
+                return
+
+            # Sort filenames numerically based on the number in "dataX"
+            sorted_filenames = sorted(
+                filenames,
+                key=lambda x: int(re.match(r"data(\d+)", x).group(1)) if re.match(r"data(\d+)", x) else 0
+            )
+            self.files_combo.addItems(sorted_filenames)
+            self.files_combo.setEnabled(not self.mqtt_connected)
+            self.open_action.setEnabled(not self.mqtt_connected and sorted_filenames)
+            logging.debug(f"SubToolBar: Populated files combo with {len(sorted_filenames)} items, enabled={not self.mqtt_connected}")
+        except Exception as e:
+            self.files_combo.addItem("Error loading files")
+            self.files_combo.setEnabled(False)
+            self.open_action.setEnabled(False)
+            logging.error(f"SubToolBar: Error updating files combo: {str(e)}")
 
     def update_subtoolbar(self):
         logging.debug(f"SubToolBar: Updating toolbar, project: {self.current_project}, MQTT: {self.mqtt_connected}, Saving: {self.is_saving}")
@@ -260,6 +326,48 @@ class SubToolBar(QWidget):
         add_action("🔌", "#ffffff", self.disconnect_mqtt_triggered, "Disconnect from MQTT", disconnect_enabled, disconnect_bg)
         self.toolbar.addSeparator()
 
+        self.files_combo = QComboBox()
+        self.files_combo.setStyleSheet("""
+            QComboBox {
+                background-color: #ffffff;
+                color: #212121;
+                border: 1px solid #90caf9;
+                border-radius: 4px;
+                padding: 4px 8px;
+                font-size: 14px;
+                font-weight: 500;
+                min-width: 150px;
+                max-width: 200px;
+            }
+            QComboBox:hover { border: 1px solid #42a5f5; background-color: #f5faff; }
+            QComboBox:disabled { background-color: #e0e0e0; color: #616161; border: 1px solid #b0bec5; }
+        """)
+        self.update_files_combo()
+        self.toolbar.addWidget(self.files_combo)
+
+        self.open_action = QAction("📂", self)
+        self.open_action.setToolTip("Open Selected File")
+        self.open_action.triggered.connect(self.open_selected_file)
+        self.open_action.setEnabled(not self.mqtt_connected and self.files_combo.count() > 0 and self.files_combo.currentText() not in ["No files available", "No project selected", "Error loading files"])
+        self.toolbar.addAction(self.open_action)
+        open_button = self.toolbar.widgetForAction(self.open_action)
+        if open_button:
+            open_button.setStyleSheet(f"""
+                QToolButton {{
+                    color: #ffffff;
+                    font-size: 24px;
+                    border: none;
+                    padding: 8px;
+                    border-radius: 5px;
+                    background-color: {'#43a047' if self.open_action.isEnabled() else '#546e7a'};
+                }}
+                QToolButton:hover {{ background-color: #4a90e2; }}
+                QToolButton:pressed {{ background-color: #357abd; }}
+                QToolButton:disabled {{ background-color: #546e7a; color: #b0bec5; }}
+            """)
+
+        self.toolbar.addSeparator()
+
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.toolbar.addWidget(spacer)
@@ -283,6 +391,14 @@ class SubToolBar(QWidget):
             """)
         self.toolbar.repaint()
 
+    def open_selected_file(self):
+        selected_file = self.files_combo.currentText()
+        if selected_file and selected_file not in ["No files available", "No project selected", "Error loading files"]:
+            self.open_file_triggered.emit(selected_file)
+            logging.debug(f"SubToolBar: Open file triggered for {selected_file}")
+        else:
+            logging.debug(f"SubToolBar: Invalid file selection: {selected_file}")
+
     def refresh_filename(self):
         if not self.filename_edit:
             return
@@ -291,11 +407,14 @@ class SubToolBar(QWidget):
             filename_counter = 1
             if self.current_project:
                 model_name = self.parent.tree_view.get_selected_model()
-                filenames = self.parent.db.get_distinct_filenames(self.current_project, model_name) if model_name else []
-                if filenames:
-                    numbers = [int(re.match(r"data(\d+)", f).group(1)) for f in filenames if re.match(r"data(\d+)", f)]
-                    filename_counter = max(numbers, default=0) + 1
-                next_filename = f"data{filename_counter}"
+                if model_name:
+                    filenames = self.parent.db.get_distinct_filenames(self.current_project, model_name)
+                    if filenames:
+                        numbers = [int(re.match(r"data(\d+)", f).group(1)) for f in filenames if re.match(r"data(\d+)", f)]
+                        filename_counter = max(numbers, default=0) + 1
+                    next_filename = f"data{filename_counter}"
+                else:
+                    logging.debug("SubToolBar: No model selected for filename refresh")
             self.filename_edit.setText(next_filename)
             logging.debug(f"SubToolBar: Refreshed filename to {next_filename}")
         except Exception as e:
