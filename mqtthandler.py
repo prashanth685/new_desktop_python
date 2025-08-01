@@ -202,8 +202,10 @@ class MQTTHandler(QObject):
                                     # Aggregate data for Multiple Trend View
                                     if buffer_key not in self._channel_data_buffer:
                                         self._channel_data_buffer[buffer_key] = [[] for _ in range(expected_channels + tacho_channels)]
+                                    # Handle all channels data (channel_index = -1)
                                     for ch_idx in range(len(values)):
                                         self._channel_data_buffer[buffer_key][ch_idx].extend(values[ch_idx])
+                                    # Check if all required channels have data
                                     if all(len(ch_data) > 0 for ch_data in self._channel_data_buffer[buffer_key][:-tacho_channels]):
                                         aggregated_values = self._channel_data_buffer[buffer_key]
                                         self.data_received.emit(feature_name, tag_name, model_name, -1, aggregated_values, sample_rate)

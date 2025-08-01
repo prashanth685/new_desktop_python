@@ -350,91 +350,19 @@ class DashboardWindow(QWidget):
             logging.error(f"Failed to retrieve project tags: {str(e)}")
             return []
 
-    def connect_mqtt(self):
-        if self.mqtt_connected:
-            self.console.append_to_console("Already connected to MQTT")
-            return
-        QTimer.singleShot(0, self.setup_mqtt)
-
-    def disconnect_mqtt(self):
-        if not self.mqtt_connected:
-            self.console.append_to_console("Already disconnected from MQTT")
-            return
-        try:
-            self.cleanup_mqtt()
-            self.mqtt_connected = False
-            self.mqtt_status_changed.emit(False)
-            logging.info(f"MQTT disconnected for project: {self.current_project}")
-            self.console.append_to_console(f"MQTT disconnected for project: {self.current_project}")
-        except Exception as e:
-            logging.error(f"Failed to disconnect MQTT: {str(e)}")
-            self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")
-
-    # def on_data_received(self, feature_name, tag_name, model_name, channel_index, values, sample_rate):
-    #     try:
-    #         for key, feature_instance in self.feature_instances.items():
-    #             instance_feature, instance_model, instance_channel, _ = key
-    #             if (instance_feature == feature_name and instance_model == model_name and
-    #                 (instance_channel is None or channel_index == -1 or
-    #                  (instance_channel and f"Channel_{channel_index + 1}" == instance_channel))):
-    #                 if hasattr(feature_instance, 'on_data_received'):
-    #                     QTimer.singleShot(0, lambda: self._update_feature(
-    #                         instance_feature, instance_model, instance_channel,
-    #                         feature_instance, tag_name, values, sample_rate
-    #                     ))
-    #                     logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}")
-    #     except Exception as e:
-    #         logging.error(f"Error in on_data_received for {feature_name}/{model_name}/channel_{channel_index}: {str(e)}")
-    #         self.console.append_to_console(f"Error processing data for {feature_name}: {str(e)}")
-
     def on_data_received(self, feature_name, tag_name, model_name, channel_index, values, sample_rate):
         try:
-            if feature_name == "Multiple Trend View":
-                # Aggregate all channel data for Multiple Trend View
-                project_data = self.db.get_project_data(self.current_project)
-                model = next((m for m in project_data["models"] if m["name"] == model_name), None)
-                if not model:
-                    logging.error(f"Model {model_name} not found for Multiple Trend View")
-                    return
-                expected_channels = len(model.get("channels", []))
-                # Assume MQTTHandler stores recent data in a buffer (modify as per your MQTTHandler)
-                if not hasattr(self, '_channel_data_buffer'):
-                    self._channel_data_buffer = {}
-                buffer_key = (tag_name, model_name)
-                if buffer_key not in self._channel_data_buffer:
-                    self._channel_data_buffer[buffer_key] = [[] for _ in range(expected_channels + 1)]  # +1 for tacho
-                # Store data
-                if channel_index >= 0 and channel_index < expected_channels:
-                    self._channel_data_buffer[buffer_key][channel_index] = values
-                elif channel_index == -1:
-                    self._channel_data_buffer[buffer_key][-1] = values  # Tacho trigger
-                # Check if we have data for all channels
-                if all(len(ch_data) > 0 for ch_data in self._channel_data_buffer[buffer_key][:-1]):
-                    aggregated_values = self._channel_data_buffer[buffer_key]
-                    for key, feature_instance in self.feature_instances.items():
-                        instance_feature, instance_model, instance_channel, _ = key
-                        if (instance_feature == feature_name and instance_model == model_name and instance_channel is None):
-                            if hasattr(feature_instance, 'on_data_received'):
-                                QTimer.singleShot(0, lambda: self._update_feature(
-                                    instance_feature, instance_model, instance_channel,
-                                    feature_instance, tag_name, aggregated_values, sample_rate
-                                ))
-                                logging.debug(f"Processed aggregated data for {feature_name}/{model_name}")
-                    # Clear buffer after sending
-                    self._channel_data_buffer[buffer_key] = [[] for _ in range(expected_channels + 1)]
-            else:
-                # Original logic for other features
-                for key, feature_instance in self.feature_instances.items():
-                    instance_feature, instance_model, instance_channel, _ = key
-                    if (instance_feature == feature_name and instance_model == model_name and
-                        (instance_channel is None or channel_index == -1 or
-                        (instance_channel and f"Channel_{channel_index + 1}" == instance_channel))):
-                        if hasattr(feature_instance, 'on_data_received'):
-                            QTimer.singleShot(0, lambda: self._update_feature(
-                                instance_feature, instance_model, instance_channel,
-                                feature_instance, tag_name, values, sample_rate
-                            ))
-                            logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}")
+            for key, feature_instance in self.feature_instances.items():
+                instance_feature, instance_model, instance_channel, _ = key
+                if (instance_feature == feature_name and instance_model == model_name and
+                    (instance_channel is None or channel_index == -1 or
+                     (instance_channel and f"Channel_{channel_index + 1}" == instance_channel))):
+                    if hasattr(feature_instance, 'on_data_received'):
+                        QTimer.singleShot(0, lambda: self._update_feature(
+                            instance_feature, instance_model, instance_channel,
+                            feature_instance, tag_name, values, sample_rate
+                        ))
+                        logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}")
         except Exception as e:
             logging.error(f"Error in on_data_received for {feature_name}/{model_name}/channel_{channel_index}: {str(e)}")
             self.console.append_to_console(f"Error processing data for {feature_name}: {str(e)}")
@@ -947,3 +875,22 @@ class DashboardWindow(QWidget):
             self.main_splitter.setSizes([tree_view_width, right_container_width])
         self.main_section.arrange_layout()
 
+    def connect_mqtt(self):
+        if self.mqtt_connected:
+            self.console.append_to_console("Already connected to MQTT")
+            return
+        QTimer.singleShot(0, self.setup_mqtt)
+
+    def disconnect_mqtt(self):
+        if not self.mqtt_connected:
+            self.console.append_to_console("Already disconnected from MQTT")
+            return
+        try:
+            self.cleanup_mqtt()
+            self.mqtt_connected = False
+            self.mqtt_status_changed.emit(False)
+            logging.info(f"MQTT disconnected for project: {self.current_project}")
+            self.console.append_to_console(f"MQTT disconnected for project: {self.current_project}")
+        except Exception as e:
+            logging.error(f"Failed to disconnect MQTT: {str(e)}")
+            self.console.append_to_console(f"Failed to disconnect MQTT: {str(e)}")

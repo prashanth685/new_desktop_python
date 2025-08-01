@@ -1,4 +1,3 @@
-import struct
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QScrollArea
 from PyQt5.QtCore import QTimer
@@ -158,10 +157,6 @@ class MultiTrendFeature:
         try:
             # Log received data structure
             self.log_info(f"Received data: {len(values)} channels, sample_rate: {sample_rate}, first channel length: {len(values[0]) if values else 0}")
-
-            # Handle single-channel data (if channel_index is used)
-            if not isinstance(values[0], (list, np.ndarray)):
-                values = [values]  # Wrap single channel data in a list
 
             # Validate data
             expected_channels = len(self.channel_names)

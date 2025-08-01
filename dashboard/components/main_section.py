@@ -102,13 +102,38 @@ class MainSection(QWidget):
 
     def on_window_state_changed(self, old_state, new_state):
         try:
-            if (old_state & Qt.WindowMaximized) and not (new_state & Qt.WindowMaximized):
+            if new_state & Qt.WindowMaximized:
+                sender = self.sender()
+                if isinstance(sender, QMdiSubWindow):
+                    self.maximize_subwindow(sender)
+                    logging.debug(f"Maximized subwindow: {sender.windowTitle()}")
+            elif (old_state & Qt.WindowMaximized) and not (new_state & Qt.WindowMaximized):
                 self.arrange_layout()
                 logging.debug("Subwindow restored, rearranging layout")
-            elif (new_state & Qt.WindowMaximized):
-                logging.debug("Subwindow maximized")
         except Exception as e:
             logging.error(f"Error in on_window_state_changed: {str(e)}")
+
+    def maximize_subwindow(self, subwindow):
+        try:
+            # Get the viewport dimensions of the scroll area
+            viewport = self.scroll_area.viewport()
+            viewport_width = viewport.width()
+            viewport_height = viewport.height()
+            # Adjust for any margins or padding
+            margins = self.layout.contentsMargins()
+            viewport_width -= (margins.left() + margins.right())
+            viewport_height -= (margins.top() + margins.bottom())
+            # Set the subwindow geometry to fit within the viewport
+            subwindow.setGeometry(0, 0, viewport_width, viewport_height)
+            # Ensure the subwindow is visible and active
+            subwindow.showMaximized()
+            self.mdi_area.setActiveSubWindow(subwindow)
+            # Update the scroll area to prevent unnecessary scrollbars
+            self.mdi_area.setMinimumSize(viewport_width, viewport_height)
+            self.scroll_area.viewport().update()
+            logging.debug(f"Maximized subwindow {subwindow.windowTitle()} to {viewport_width}x{viewport_height}")
+        except Exception as e:
+            logging.error(f"Error maximizing subwindow {subwindow.windowTitle()}: {str(e)}")
 
     def arrange_layout(self, layout=None):
         try:
@@ -122,6 +147,11 @@ class MainSection(QWidget):
                 self.mdi_area.setMinimumSize(0, 0)
                 logging.debug("No subwindows to arrange")
                 return
+            # Skip arrangement if any subwindow is maximized
+            for subwindow in subwindows:
+                if subwindow.isMaximized():
+                    logging.debug(f"Skipping arrangement due to maximized subwindow: {subwindow.windowTitle()}")
+                    return
             rows, cols = map(int, self.current_layout.split('x'))
             viewport_width = self.scroll_area.viewport().width()
             viewport_height = self.scroll_area.viewport().height()
@@ -134,8 +164,6 @@ class MainSection(QWidget):
             subwindows_per_page = rows * cols
             total_rows_needed = (total_subwindows + cols - 1) // cols
             for idx, subwindow in enumerate(subwindows):
-                if subwindow.isMaximized():
-                    continue
                 row = idx // cols
                 col = idx % cols
                 x = GAP + col * (subwindow_width + GAP)
