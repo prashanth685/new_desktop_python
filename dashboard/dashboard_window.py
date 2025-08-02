@@ -350,7 +350,7 @@ class DashboardWindow(QWidget):
             logging.error(f"Failed to retrieve project tags: {str(e)}")
             return []
 
-    def on_data_received(self, feature_name, tag_name, model_name, channel_index, values, sample_rate):
+    def on_data_received(self, feature_name, tag_name, model_name, channel_index, values, sample_rate, frame_index):
         try:
             for key, feature_instance in self.feature_instances.items():
                 instance_feature, instance_model, instance_channel, _ = key
@@ -360,19 +360,19 @@ class DashboardWindow(QWidget):
                     if hasattr(feature_instance, 'on_data_received'):
                         QTimer.singleShot(0, lambda: self._update_feature(
                             instance_feature, instance_model, instance_channel,
-                            feature_instance, tag_name, values, sample_rate
+                            feature_instance, tag_name, values, sample_rate, frame_index
                         ))
-                        logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}")
+                        logging.debug(f"Processed data for {feature_name}/{model_name}/channel_{channel_index}, frame {frame_index}")
         except Exception as e:
-            logging.error(f"Error in on_data_received for {feature_name}/{model_name}/channel_{channel_index}: {str(e)}")
+            logging.error(f"Error in on_data_received for {feature_name}/{model_name}/channel_{channel_index}, frame {frame_index}: {str(e)}")
             self.console.append_to_console(f"Error processing data for {feature_name}: {str(e)}")
 
-    def _update_feature(self, feature_name, model_name, channel, feature_instance, tag_name, values, sample_rate):
+    def _update_feature(self, feature_name, model_name, channel, feature_instance, tag_name, values, sample_rate, frame_index):
         try:
-            feature_instance.on_data_received(tag_name, model_name, values, sample_rate)
-            logging.debug(f"Updated feature {feature_name}/{model_name}/{channel or 'No Channel'}")
+            feature_instance.on_data_received(tag_name, model_name, values, sample_rate, frame_index)
+            logging.debug(f"Updated feature {feature_name}/{model_name}/{channel or 'No Channel'}, frame {frame_index}")
         except Exception as e:
-            logging.error(f"Error updating feature {feature_name}/{model_name}/{channel or 'No Channel'}: {str(e)}")
+            logging.error(f"Error updating feature {feature_name}/{model_name}/{channel or 'No Channel'}, frame {frame_index}: {str(e)}")
 
     def on_mqtt_status(self, message):
         self.mqtt_connected = "Connected" in message

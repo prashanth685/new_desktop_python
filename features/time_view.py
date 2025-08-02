@@ -11,23 +11,20 @@ import logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 class TimeAxisItem(AxisItem):
-    """Custom axis to display datetime on x-axis."""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
 
     def tickStrings(self, values, scale, spacing):
-        """Convert timestamps to 'YYYY-MM-DD\nHH:MM:SS' format."""
         return [datetime.fromtimestamp(v).strftime('%Y-%m-%d\n%H:%M:%S') for v in values]
 
 class MouseTracker(QObject):
-    """Event filter to track mouse enter/leave on plot viewport (no longer used for lines)."""
     def __init__(self, parent, idx, feature):
         super().__init__(parent)
         self.idx = idx
         self.feature = feature
 
     def eventFilter(self, obj, event):
-        return False  # No action needed since lines are removed
+        return False
 
 class TimeViewFeature:
     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
@@ -66,7 +63,6 @@ class TimeViewFeature:
         self.widget = QWidget()
         main_layout = QVBoxLayout()
 
-        # Top layout with settings button on the right
         top_layout = QHBoxLayout()
         top_layout.addStretch()
         self.settings_button = QPushButton("⚙️ Settings")
@@ -91,7 +87,6 @@ class TimeViewFeature:
         top_layout.addWidget(self.settings_button)
         main_layout.addLayout(top_layout)
 
-        # Settings panel
         self.settings_panel = QWidget()
         self.settings_panel.setStyleSheet("""
             QWidget {
@@ -106,7 +101,6 @@ class TimeViewFeature:
         settings_layout.setSpacing(10)
         self.settings_panel.setLayout(settings_layout)
 
-        # Window size selection
         window_label = QLabel("Window Size (seconds)")
         window_label.setStyleSheet("font-size: 14px;")
         settings_layout.addWidget(window_label, 0, 0)
@@ -125,7 +119,6 @@ class TimeViewFeature:
         settings_layout.addWidget(window_combo, 0, 1)
         self.settings_widgets = {"WindowSeconds": window_combo}
 
-        # Save and Close buttons
         save_button = QPushButton("Save")
         save_button.setStyleSheet("""
             QPushButton {
@@ -368,9 +361,9 @@ class TimeViewFeature:
         except AttributeError:
             logging.warning("No sub_tool_bar found to refresh filenames")
 
-    def on_data_received(self, tag_name, model_name, values, sample_rate):
+    def on_data_received(self, tag_name, model_name, values, sample_rate, frame_index):
         logging.debug(f"on_data_received called with tag_name={tag_name}, model_name={model_name}, "
-                     f"values_len={len(values) if values else 0}, sample_rate={sample_rate}")
+                     f"values_len={len(values) if values else 0}, sample_rate={sample_rate}, frame_index={frame_index}")
         if self.model_name != model_name:
             logging.debug(f"Ignoring data for model {model_name}, expected {self.model_name}")
             return
@@ -402,7 +395,6 @@ class TimeViewFeature:
             time_step = 1.0 / sample_rate
             new_times = np.array([current_time - (self.samples_per_channel - 1 - i) * time_step for i in range(self.samples_per_channel)])
 
-            # Update main channels
             for ch in range(self.main_channels):
                 new_data = np.array(values[ch]) * self.scaling_factor
                 if len(self.fifo_data[ch]) != self.fifo_window_samples:
@@ -414,7 +406,6 @@ class TimeViewFeature:
                 self.fifo_times[ch][-self.samples_per_channel:] = new_times
                 self.needs_refresh[ch] = True
 
-            # Update tacho frequency channel
             if self.tacho_channels_count >= 1 and self.main_channels < len(values):
                 new_data = np.array(values[self.main_channels]) / 100
                 if len(self.fifo_data[self.main_channels]) != self.fifo_window_samples:
@@ -426,7 +417,6 @@ class TimeViewFeature:
                 self.fifo_times[self.main_channels][-self.samples_per_channel:] = new_times
                 self.needs_refresh[self.main_channels] = True
 
-            # Update tacho trigger channel
             if self.tacho_channels_count >= 2 and self.main_channels + 1 < len(values):
                 new_data = np.array(values[self.main_channels + 1])
                 if len(self.fifo_data[self.main_channels + 1]) != self.fifo_window_samples:
@@ -438,7 +428,6 @@ class TimeViewFeature:
                 self.fifo_times[self.main_channels + 1][-self.samples_per_channel:] = new_times
                 self.needs_refresh[self.main_channels + 1] = True
 
-            # Ensure time arrays are sorted
             for ch in range(self.total_channels):
                 if len(self.fifo_times[ch]) > 1:
                     sort_indices = np.argsort(self.fifo_times[ch])
@@ -451,7 +440,7 @@ class TimeViewFeature:
                     message_data = {
                         "topic": tag_name,
                         "filename": self.current_filename,
-                        "frameIndex": 0,
+                        "frameIndex": frame_index,
                         "message": {
                             "channel_data": [list(values[i]) for i in range(self.main_channels)],
                             "tacho_freq": list(values[self.main_channels]) if self.tacho_channels_count >= 1 else [],
@@ -465,9 +454,9 @@ class TimeViewFeature:
                     }
                     success, msg = self.db.save_timeview_message(self.project_name, self.model_name, message_data)
                     if success:
-                        logging.info(f"Saved data to database: {self.current_filename}")
+                        logging.info(f"Saved data to database: {self.current_filename}, frame {frame_index}")
                         if self.console:
-                            self.console.append_to_console(f"Saved data to {self.current_filename}")
+                            self.console.append_to_console(f"Saved data to {self.current_filename}, frame {frame_index}")
                     else:
                         self.log_and_set_status(f"Failed to save data: {msg}")
                 except Exception as e:
@@ -502,7 +491,6 @@ class TimeViewFeature:
                     self.log_and_set_status(f"Insufficient time data for plot {ch}: {len(times)} < {self.fifo_window_samples}")
                     continue
 
-                # Filter data within the current window
                 mask = (times >= window_start_time) & (times <= current_time)
                 filtered_times = times[mask]
                 filtered_data = data[mask]
@@ -511,7 +499,6 @@ class TimeViewFeature:
                     self.log_and_set_status(f"No data within window for plot {ch}")
                     continue
 
-                # Update plot data
                 self.plots[ch].setData(filtered_times, filtered_data)
                 self.plot_widgets[ch].setXRange(window_start_time, current_time, padding=0.02)
                 if ch < self.main_channels:

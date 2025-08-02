@@ -3,14 +3,14 @@ from PyQt5.QtCore import QObject, pyqtSignal
 import pyqtgraph as pg
 import numpy as np
 import logging
+from datetime import datetime
 
 class OrbitFeature(QObject):
-    # Signals for communicating channel changes
-    primary_channel_changed = pyqtSignal(int)  # Emits primary channel index
-    secondary_channel_changed = pyqtSignal(int)  # Emits secondary channel index
+    primary_channel_changed = pyqtSignal(int)
+    secondary_channel_changed = pyqtSignal(int)
 
     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None, channel_count=None):
-        super().__init__(parent)  # Initialize QObject with parent
+        super().__init__(parent)
         self.parent = parent
         self.db = db
         self.project_name = project_name
@@ -31,9 +31,10 @@ class OrbitFeature(QObject):
         self.samples_per_channel = None
         self.current_time = 0.0
         self.available_channels = []
-        self.is_updating = False  # Flag to prevent recursive updates
+        self.is_updating = False
+        self.last_frame_index = -1
+        self.window_seconds = 1.0
         self.initUI()
-        # Connect to TreeView signals for model and channel updates
         self.parent.tree_view.model_selected.connect(self.update_model)
         self.parent.tree_view.channel_selected.connect(self.update_channel)
         self.load_channel_data()
@@ -48,7 +49,6 @@ class OrbitFeature(QObject):
         main_layout = QVBoxLayout()
         self.widget.setLayout(main_layout)
 
-        # Primary channel selection combo box
         primary_label = QLabel("Primary Channel:")
         self.primary_combo = QComboBox()
         self.primary_combo.setStyleSheet("""
@@ -64,7 +64,6 @@ class OrbitFeature(QObject):
         """)
         self.primary_combo.currentIndexChanged.connect(self.on_primary_combo_changed)
 
-        # Secondary channel selection combo box
         secondary_label = QLabel("Secondary Channel:")
         self.secondary_combo = QComboBox()
         self.secondary_combo.setStyleSheet("""
@@ -80,7 +79,6 @@ class OrbitFeature(QObject):
         """)
         self.secondary_combo.currentIndexChanged.connect(self.on_secondary_combo_changed)
 
-        # Add combo boxes to layout
         combo_layout = QHBoxLayout()
         combo_layout.addWidget(primary_label)
         combo_layout.addWidget(self.primary_combo)
@@ -88,15 +86,12 @@ class OrbitFeature(QObject):
         combo_layout.addWidget(self.secondary_combo)
         main_layout.addLayout(combo_layout)
 
-        # Layout for plots
         self.plot_layout = QHBoxLayout()
         main_layout.addLayout(self.plot_layout)
 
-        # Initialize plots
         self.create_plots()
 
     def update_model(self, model_name):
-        """Handle model selection changes from TreeView."""
         if self.model_name != model_name:
             self.model_name = model_name
             self.selected_channel = None
@@ -109,7 +104,6 @@ class OrbitFeature(QObject):
                 self.console.append_to_console(f"OrbitFeature: Updated model to {model_name}")
 
     def update_channel(self, model_name, channel_name):
-        """Handle channel selection changes from TreeView."""
         if self.model_name == model_name and channel_name in self.available_channels:
             self.update_selected_channel(channel_name)
             if self.console:
@@ -122,7 +116,6 @@ class OrbitFeature(QObject):
                 )
 
     def load_channel_data(self):
-        """Load channel data from the database and update combo boxes."""
         try:
             if not self.project_name or not self.model_name:
                 if self.console:
@@ -194,7 +187,6 @@ class OrbitFeature(QObject):
             self.clear_plots()
 
     def get_channel_index(self, channel_name):
-        """Get the index of a channel by name."""
         try:
             if not channel_name:
                 if self.console:
@@ -215,7 +207,6 @@ class OrbitFeature(QObject):
             return None
 
     def on_primary_combo_changed(self, index):
-        """Handle primary channel selection change."""
         if self.is_updating:
             return
         self.is_updating = True
@@ -237,7 +228,6 @@ class OrbitFeature(QObject):
             self.is_updating = False
 
     def on_secondary_combo_changed(self, index):
-        """Handle secondary channel selection change."""
         if self.is_updating:
             return
         self.is_updating = True
@@ -258,11 +248,9 @@ class OrbitFeature(QObject):
             self.is_updating = False
 
     def create_plots(self):
-        """Create the orbit and time-domain plots."""
         if self.plot_widgets or self.time_plot_widgets:
-            return  # Plots already exist, just update them
+            return
 
-        # Clear layout
         while self.plot_layout.count():
             item = self.plot_layout.takeAt(0)
             if item.widget():
@@ -275,7 +263,6 @@ class OrbitFeature(QObject):
                 self.console.append_to_console("OrbitFeature: No channels available, cannot create plots")
             return
 
-        # Orbit plot
         plot_widget = pg.PlotWidget()
         plot_widget.setBackground('w')
         plot_widget.setFixedSize(500, 500)
@@ -286,13 +273,13 @@ class OrbitFeature(QObject):
         plot_item.setLabel('left', f"Channel {self.available_channels[self.secondary_channel]}")
         plot_item.showGrid(x=True, y=True)
         plot_item.setAspectLocked(True)
-        plot_item.enableAutoRange('xy', True)
+        plot_item.setXRange(-1.0, 1.0, padding=0.02)
+        plot_item.setYRange(-1.0, 1.0, padding=0.02)
         data_plot = plot_item.plot(pen=pg.mkPen('b', width=2))
         self.plot_widgets.append(plot_widget)
         self.plot_items.append(plot_item)
         self.data_plots.append(data_plot)
 
-        # Time-domain plots
         time_colors = ['r', 'g', 'b', 'y', 'c', 'm', 'k', '#FF4500', '#32CD32', '#00CED1', '#FFD700',
                        '#FF69B4', '#8A2BE2', '#FF6347', '#20B2AA', '#ADFF2F', '#9932CC', '#FF7F50', '#00FA9A', '#9400D3']
         for ch in [self.primary_channel, self.secondary_channel]:
@@ -306,6 +293,8 @@ class OrbitFeature(QObject):
                 time_plot_item.setLabel('bottom', "Time (s)")
                 time_plot_item.setLabel('left', f"Channel {self.available_channels[ch]} Value")
                 time_plot_item.showGrid(x=True, y=True)
+                time_plot_item.setXRange(self.current_time - self.window_seconds, self.current_time, padding=0.02)
+                time_plot_item.enableAutoRange('y', True)
                 time_plot = time_plot_item.plot(pen=pg.mkPen(time_colors[ch % len(time_colors)], width=2))
                 self.time_plot_widgets.append(time_plot_widget)
                 self.time_plots.append(time_plot)
@@ -317,17 +306,13 @@ class OrbitFeature(QObject):
                 f"plot widgets: {len(self.plot_widgets)} orbit, {len(self.time_plot_widgets)} time"
             )
 
-        # Update plots with existing data
         self.update_plots()
 
     def update_plot_labels(self):
-        """Update plot titles and labels without recreating widgets."""
         if self.plot_items and self.time_plot_widgets:
-            # Update orbit plot labels
             self.plot_items[0].setTitle(f"Orbit Plot (Ch {self.available_channels[self.secondary_channel]} vs Ch {self.available_channels[self.primary_channel]})")
             self.plot_items[0].setLabel('bottom', f"Channel {self.available_channels[self.primary_channel]}")
             self.plot_items[0].setLabel('left', f"Channel {self.available_channels[self.secondary_channel]}")
-            # Update time-domain plot labels
             for i, ch in enumerate([self.primary_channel, self.secondary_channel]):
                 if i < len(self.time_plot_widgets) and ch < self.channel_count:
                     self.time_plot_widgets[i].getPlotItem().setTitle(f"Channel {self.available_channels[ch]} Time Domain")
@@ -336,7 +321,6 @@ class OrbitFeature(QObject):
                 self.console.append_to_console("OrbitFeature: Updated plot labels")
 
     def clear_plots(self):
-        """Clear all plot data."""
         if self.data_plots:
             self.data_plots[0].clear()
         for plot in self.time_plots:
@@ -348,21 +332,18 @@ class OrbitFeature(QObject):
             self.console.append_to_console("OrbitFeature: Cleared all plots")
 
     def update_plots(self):
-        """Update plot data based on current channel selections."""
         if not self.data_plots or not self.time_plots:
             if self.console:
                 self.console.append_to_console("OrbitFeature: No plots available for update")
             return
 
-        # Log current channel data state
+        data_lengths = [len(d) if isinstance(d, (list, np.ndarray)) else 0 for d in self.channel_data]
         if self.console:
-            data_lengths = [len(d) if isinstance(d, (list, np.ndarray)) else 0 for d in self.channel_data]
             self.console.append_to_console(
                 f"OrbitFeature: Updating plots with channel data lengths: {data_lengths}, "
                 f"primary: {self.primary_channel}, secondary: {self.secondary_channel}"
             )
 
-        # Validate channel indices and data
         if (self.primary_channel >= len(self.channel_data) or 
             self.secondary_channel >= len(self.channel_data) or
             len(self.channel_data[self.primary_channel]) == 0 or 
@@ -376,14 +357,14 @@ class OrbitFeature(QObject):
             self.clear_plots()
             return
 
-        # Update orbit plot
         x_data = np.array(self.channel_data[self.primary_channel])
         y_data = np.array(self.channel_data[self.secondary_channel])
         if x_data.size > 0 and y_data.size > 0 and x_data.size == y_data.size:
-            self.data_plots[0].clear()  # Clear previous data
+            self.data_plots[0].clear()
             self.data_plots[0].setData(x_data, y_data)
-            self.plot_items[0].enableAutoRange('xy', True)  # Force auto-range to refresh view
-            self.plot_items[0].getViewBox().update()  # Explicitly update view
+            self.plot_items[0].setXRange(-1.0, 1.0, padding=0.02)
+            self.plot_items[0].setYRange(-1.0, 1.0, padding=0.02)
+            self.plot_items[0].getViewBox().update()
             if self.console:
                 self.console.append_to_console(
                     f"OrbitFeature: Updated orbit plot with {x_data.size} samples for "
@@ -397,7 +378,6 @@ class OrbitFeature(QObject):
                     f"OrbitFeature: Cannot update orbit plot - invalid data sizes (x: {x_data.size}, y: {y_data.size})"
                 )
 
-        # Update time-domain plots
         if self.sample_rate and self.samples_per_channel:
             time = np.linspace(self.current_time - self.samples_per_channel / self.sample_rate, 
                              self.current_time, self.samples_per_channel, endpoint=False)
@@ -405,10 +385,13 @@ class OrbitFeature(QObject):
                 if i < len(self.time_plots) and ch < len(self.channel_data) and len(self.channel_data[ch]) > 0:
                     ch_data = np.array(self.channel_data[ch])
                     if ch_data.size > 0:
-                        self.time_plots[i].clear()  # Clear previous data
+                        self.time_plots[i].clear()
                         self.time_plots[i].setData(time, ch_data)
-                        self.time_plot_widgets[i].getPlotItem().enableAutoRange('xy', True)  # Force auto-range
-                        self.time_plot_widgets[i].getViewBox().update()  # Explicitly update view
+                        self.time_plot_widgets[i].getPlotItem().setXRange(
+                            self.current_time - self.window_seconds, self.current_time, padding=0.02
+                        )
+                        self.time_plot_widgets[i].getPlotItem().enableAutoRange('y', True)
+                        self.time_plot_widgets[i].getViewBox().update()
                         if self.console:
                             self.console.append_to_console(
                                 f"OrbitFeature: Updated time plot {i} for channel {self.available_channels[ch]} with {ch_data.size} samples, "
@@ -428,42 +411,46 @@ class OrbitFeature(QObject):
                     f"OrbitFeature: Cannot update time plots - missing sample rate ({self.sample_rate}) or sample count ({self.samples_per_channel})"
                 )
 
-    def on_data_received(self, tag_name, model_name, values, sample_rate):
-        """Process incoming data for the selected model."""
+    def on_data_received(self, tag_name, model_name, values, sample_rate, frame_index):
         if self.model_name != model_name:
             return
         try:
+            if frame_index != self.last_frame_index + 1 and self.last_frame_index != -1:
+                logging.warning(f"Non-sequential frame index: expected {self.last_frame_index + 1}, got {frame_index}")
+                if self.console:
+                    self.console.append_to_console(f"Warning: Non-sequential frame index: expected {self.last_frame_index + 1}, got {frame_index}")
+            self.last_frame_index = frame_index
+
             if len(values) < self.channel_count:
                 if self.console:
                     self.console.append_to_console(
-                        f"OrbitFeature: Received {len(values)} channels, expected at least {self.channel_count}"
+                        f"OrbitFeature: Received {len(values)} channels, expected at least {self.channel_count}, frame {frame_index}"
                     )
                 return
             self.sample_rate = sample_rate
             self.samples_per_channel = len(values[0])
+            self.current_time = datetime.now().timestamp()
             for i in range(min(self.channel_count, len(values))):
                 if len(values[i]) == self.samples_per_channel:
                     self.channel_data[i] = np.array(values[i])
                 else:
                     if self.console:
                         self.console.append_to_console(
-                            f"OrbitFeature: Channel {i} has {len(values[i])} samples, expected {self.samples_per_channel}"
+                            f"OrbitFeature: Channel {i} has {len(values[i])} samples, expected {self.samples_per_channel}, frame {frame_index}"
                         )
                     return
             if self.console:
                 self.console.append_to_console(
                     f"OrbitFeature ({self.model_name}): Received {self.samples_per_channel} samples for {self.channel_count} channels, "
-                    f"data lengths: {[len(d) for d in self.channel_data]}, "
-                    f"sample data: {[d[:5].tolist() for d in self.channel_data if len(d) > 0]}"
+                    f"data lengths: {[len(d) for d in self.channel_data]}, frame {frame_index}"
                 )
             self.update_plots()
         except Exception as e:
             if self.console:
-                self.console.append_to_console(f"OrbitFeature: Error processing data: {str(e)}")
-            logging.error(f"OrbitFeature: Error processing data: {str(e)}")
+                self.console.append_to_console(f"OrbitFeature: Error processing data, frame {frame_index}: {str(e)}")
+            logging.error(f"OrbitFeature: Error processing data, frame {frame_index}: {str(e)}")
 
     def update_selected_channel(self, channel_name):
-        """Update the selected channel based on TreeView signal."""
         if self.is_updating:
             return
         self.is_updating = True
@@ -500,7 +487,6 @@ class OrbitFeature(QObject):
         return self.widget
 
     def cleanup(self):
-        """Clean up resources."""
         for plot_widget in self.plot_widgets + self.time_plot_widgets:
             plot_widget.deleteLater()
         self.plot_widgets = []
@@ -513,7 +499,6 @@ class OrbitFeature(QObject):
             self.console.append_to_console("OrbitFeature: Cleaned up resources")
 
     def refresh_channel_properties(self):
-        """Refresh channel properties and update UI."""
         self.load_channel_data()
         if self.console:
             self.console.append_to_console("OrbitFeature: Refreshed channel properties")

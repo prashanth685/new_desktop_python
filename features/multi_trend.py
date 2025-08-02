@@ -1,11 +1,18 @@
 import numpy as np
 from PyQt5.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel, QCheckBox, QScrollArea
-from PyQt5.QtCore import QTimer
+from PyQt5.QtCore import QTimer, Qt
 import pyqtgraph as pg
 from datetime import datetime
 import logging
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
+class TimeAxisItem(pg.AxisItem):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+    def tickStrings(self, values, scale, spacing):
+        return [datetime.fromtimestamp(val * 86400.0).strftime('%H:%M:%S') for val in values]
 
 class MultiTrendFeature:
     def __init__(self, parent, db, project_name, channel=None, model_name=None, console=None):
@@ -36,10 +43,16 @@ class MultiTrendFeature:
         self.scaling_factor = 3.3 / 65535.0
         self.display_window_seconds = 60.0
         self.user_interacted = False
-        self.last_right_limit = float('-inf')
+        self.last_right_limit = None
         self.tag_name = None
+        self.last_frame_index = -1
         self.init_data()
         self.init_ui()
+        if self.console:
+            self.console.append_to_console(
+                f"Initialized MultiTrendFeature for {self.model_name or 'No Model'}/{self.channel or 'No Channel'} "
+                f"with {len(self.channel_names)} channels"
+            )
 
     def init_data(self):
         try:
@@ -70,7 +83,7 @@ class MultiTrendFeature:
         self.widget.setLayout(main_layout)
 
         # Header
-        header_label = QLabel(f"Multi Trend View for Model: {self.model_name}")
+        header_label = QLabel(f"Multi Trend View for Model: {self.model_name or 'Unknown'}")
         header_label.setStyleSheet("font-size: 16px; font-weight: bold; padding: 10px;")
         main_layout.addWidget(header_label)
 
@@ -93,12 +106,14 @@ class MultiTrendFeature:
         main_layout.addWidget(scroll_area)
 
         # Plot
-        self.plot_widget = pg.PlotWidget()
+        self.plot_widget = pg.PlotWidget(axisItems={'bottom': TimeAxisItem(orientation='bottom')})
         self.plot_widget.setBackground('w')
         self.plot_widget.showGrid(x=True, y=True)
-        self.plot_widget.setLabel('bottom', 'Time')
+        self.plot_widget.setLabel('bottom', 'Time (hh:mm:ss)')
         self.plot_widget.setLabel('left', 'Direct (Peak-to-Peak Voltage, V)')
         self.plot_widget.addLegend()
+        self.plot_widget.setXRange(-self.display_window_seconds / 86400.0, 0, padding=0.02)
+        self.plot_widget.enableAutoRange('y', True)
         self.plots = []
         for i, ch_name in enumerate(self.channel_names):
             plot = self.plot_widget.plot([], [], pen=pg.mkPen(color=self.colors[i % len(self.colors)], width=2),
@@ -108,12 +123,12 @@ class MultiTrendFeature:
 
         # Handle user interaction
         self.plot_widget.scene().sigMouseClicked.connect(self.on_mouse_clicked)
-        self.plot_widget.getViewBox().sigRangeChanged.connect(self.on_range_changed)
+        self.plot_widget.getViewBox().sigRangeChangedManually.connect(self.on_range_changed)
 
         # Error message
         self.error_label = QLabel("Waiting for data...")
         self.error_label.setStyleSheet("color: red; font-size: 14px; padding: 10px;")
-        self.error_label.setAlignment(pg.QtCore.Qt.AlignCenter)
+        self.error_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(self.error_label)
         self.error_label.setVisible(True)
 
@@ -127,16 +142,19 @@ class MultiTrendFeature:
         self.log_info("Initialized MultiTrendFeature UI")
 
     def toggle_channel(self, index, state):
-        self.plots[index].setVisible(state == pg.QtCore.Qt.Checked)
+        self.plots[index].setVisible(state == Qt.Checked)
         self.plot_widget.getViewBox().update()
         self.update_plot()
+        self.log_info(f"Toggled channel {self.channel_names[index]}: {'visible' if state == Qt.Checked else 'hidden'}")
 
     def on_mouse_clicked(self, event):
         self.user_interacted = True
+        self.log_info("User interacted with plot via mouse click")
 
-    def on_range_changed(self, viewbox, range):
+    def on_range_changed(self, viewbox, ranges):
         self.user_interacted = True
-        self.last_right_limit = range[0][1]
+        self.last_right_limit = ranges[0][1]
+        self.log_info(f"User changed plot range, new right limit: {self.last_right_limit}")
 
     def log_info(self, message):
         logging.info(message)
@@ -150,18 +168,25 @@ class MultiTrendFeature:
         self.error_label.setText(message)
         self.error_label.setVisible(True)
 
-    def on_data_received(self, tag_name, model_name, values, sample_rate):
+    def on_data_received(self, tag_name, model_name, values, sample_rate, frame_index):
         if self.model_name != model_name or self.tag_name != tag_name:
-            self.log_info(f"Ignoring data for tag: {tag_name}, model: {model_name}")
+            self.log_info(f"Ignoring data for tag: {tag_name}, model: {model_name}, frame {frame_index}")
             return
         try:
+            if frame_index != self.last_frame_index + 1 and self.last_frame_index != -1:
+                logging.warning(f"Non-sequential frame index: expected {self.last_frame_index + 1}, got {frame_index}")
+                if self.console:
+                    self.console.append_to_console(f"Warning: Non-sequential frame index: expected {self.last_frame_index + 1}, got {frame_index}")
+            self.last_frame_index = frame_index
+
             # Log received data structure
-            self.log_info(f"Received data: {len(values)} channels, sample_rate: {sample_rate}, first channel length: {len(values[0]) if values else 0}")
+            self.log_info(f"Received data: {len(values)} channels, sample_rate: {sample_rate}, "
+                          f"first channel length: {len(values[0]) if values else 0}, frame {frame_index}")
 
             # Validate data
             expected_channels = len(self.channel_names)
             if len(values) < expected_channels:
-                self.log_error(f"Invalid data: expected at least {expected_channels} channels, got {len(values)}")
+                self.log_error(f"Invalid data: expected at least {expected_channels} channels, got {len(values)}, frame {frame_index}")
                 return
 
             # Extract main channels and tacho trigger (last channel, if available)
@@ -172,7 +197,7 @@ class MultiTrendFeature:
             if not trigger_data or len(trigger_data) < len(main_data[0]):
                 # Generate synthetic triggers (every 100 samples)
                 trigger_data = [1 if i % 100 == 0 else 0 for i in range(len(main_data[0]))]
-                self.log_info("No valid trigger data; using synthetic triggers.")
+                self.log_info(f"No valid trigger data; using synthetic triggers, frame {frame_index}")
 
             # Find trigger indices
             trigger_indices = [i for i, v in enumerate(trigger_data) if v >= 1.0]
@@ -184,11 +209,11 @@ class MultiTrendFeature:
             trigger_indices = filtered_triggers
 
             if len(trigger_indices) < 2:
-                self.log_error("Not enough trigger points detected.")
+                self.log_error(f"Not enough trigger points detected, frame {frame_index}")
                 # Use synthetic triggers as fallback
                 trigger_indices = list(range(0, len(main_data[0]), 100))
                 if len(trigger_indices) < 2:
-                    self.log_error("Synthetic triggers insufficient.")
+                    self.log_error(f"Synthetic triggers insufficient, frame {frame_index}")
                     return
 
             # Calibrate data
@@ -214,10 +239,11 @@ class MultiTrendFeature:
                     self.channel_data[ch_idx]["timestamps"] = self.channel_data[ch_idx]["timestamps"][-3600:]
                     self.channel_data[ch_idx]["direct_data"] = self.channel_data[ch_idx]["direct_data"][-3600:]
 
-            self.log_info(f"Processed data for {tag_name}: {len(self.channel_names)} channels at {datetime.now().strftime('%H:%M:%S')}")
+            self.log_info(f"Processed data for {tag_name}: {len(self.channel_names)} channels at "
+                          f"{datetime.fromtimestamp(current_time * 86400.0).strftime('%H:%M:%S')}, frame {frame_index}")
             self.update_plot()
         except Exception as e:
-            self.log_error(f"Error processing data: {str(e)}")
+            self.log_error(f"Error processing data, frame {frame_index}: {str(e)}")
 
     def update_plot(self):
         try:
@@ -237,35 +263,32 @@ class MultiTrendFeature:
                     plot.setData([], [])
 
             if not has_data:
-                vb.setXRange(current_time - self.display_window_seconds / 86400.0, current_time, padding=0.05)
-                vb.setYRange(-1, 1, padding=0.05)
-                self.plot_widget.getPlotItem().autoRange()
+                vb.setXRange(current_time - self.display_window_seconds / 86400.0, current_time, padding=0.02)
+                vb.enableAutoRange('y', True)
                 return
 
             max_time = max(max((d["timestamps"] or [0])[-1] for d in self.channel_data if d["timestamps"]), current_time)
             min_time = max_time - self.display_window_seconds / 86400.0
 
-            if self.user_interacted:
-                current_range = vb.viewRange()
-                min_time = current_range[0][0]
-                max_time = current_range[0][1]
+            if self.user_interacted and self.last_right_limit is not None:
+                max_time = self.last_right_limit
+                min_time = max_time - self.display_window_seconds / 86400.0
                 if abs(max_time - max(d["timestamps"][-1] for d in self.channel_data if d["timestamps"])) < 1.0 / 86400.0:
                     self.user_interacted = False
                     min_time = max_time - self.display_window_seconds / 86400.0
+                    max_time = current_time
             else:
                 if max(d["timestamps"][-1] for d in self.channel_data if d["timestamps"]) - min(d["timestamps"][0] for d in self.channel_data if d["timestamps"]) < self.display_window_seconds / 86400.0:
                     min_time = min(d["timestamps"][0] for d in self.channel_data if d["timestamps"])
 
-            vb.setXRange(min_time, max_time, padding=0.05)
-
+            vb.setXRange(min_time, max_time, padding=0.02)
             if any(d["direct_data"] for d in self.channel_data):
                 min_y = min(min(d["direct_data"] or [float('inf')]) for d in self.channel_data) * 0.9
                 max_y = max(max(d["direct_data"] or [float('-inf')]) for d in self.channel_data) * 1.1
-                vb.setYRange(min_y, max_y, padding=0.05)
+                vb.setYRange(min_y, max_y, padding=0.02)
             else:
-                vb.setYRange(-1, 1, padding=0.05)
+                vb.setYRange(-1, 1, padding=0.02)
 
-            self.plot_widget.getPlotItem().autoRange()
             self.log_info("Plot updated")
         except Exception as e:
             self.log_error(f"Error updating plot: {str(e)}")
