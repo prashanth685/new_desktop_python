@@ -55,6 +55,7 @@ class CreateProjectWidget(QWidget):
         self.available_directions = ["Right", "Left"]
         self.available_channel_counts = ["DAQ4CH", "DAQ8CH", "DAQ10CH"]
         self.initUI()
+        logging.debug(f"Initialized CreateProjectWidget in {'edit' if edit_mode else 'create'} mode for project: {existing_project_name}")
 
     def initUI(self):
         self.setStyleSheet("background-color: #f7f7f9;")
@@ -593,13 +594,6 @@ class CreateProjectWidget(QWidget):
             if self.edit_mode:
                 self.project_edited.emit(project_name, self.models, channel_count)
             else:
-                project_data = {
-                    "project_name": project_name,
-                    "email": self.db.email,
-                    "createdAt": datetime.datetime.now().isoformat(),
-                    "models": self.models,
-                    "channel_count": channel_count
-                }
                 success, message = self.db.create_project(project_name, self.models, channel_count)
                 if success:
                     QMessageBox.information(self, "Success", "Project created successfully!")

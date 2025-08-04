@@ -6,8 +6,6 @@ import numpy as np
 import logging
 from scipy.fft import fft
 from scipy.signal import get_window
-from pymongo import MongoClient
-from bson.objectid import ObjectId
 from datetime import datetime
 
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -47,7 +45,7 @@ class FFTViewFeature:
         self.update_interval = 200
         self.max_samples = 4096
         self.layout_type = layout
-        self.mongo_client = MongoClient("mongodb://localhost:27017")
+        self.mongo_client = self.db.client  # Use existing client from db
         self.project_id = None
         self.settings = FFTSettings(None)
         self.data_buffer = []
@@ -117,7 +115,7 @@ class FFTViewFeature:
                 padding: 8px 16px;
                 border-radius: 4px;
                 font-size: 14px;
-                min-width: 120px;
+                min-width: 代表px;
             }
             QPushButton:hover {
                 background-color: #45a049;
@@ -446,6 +444,11 @@ class FFTViewFeature:
             self.log_and_set_status(f"Error loading FFT settings: {str(e)}")
 
     def save_settings_to_database(self):
+        if not self.project_id:
+            logging.error("Project ID is not set, cannot save settings")
+            if self.console:
+                self.console.append_to_console("Error: Project ID is not set, cannot save settings")
+            return
         try:
             database = self.mongo_client.get_database("changed_db")
             settings_collection = database.get_collection("FFTSettings")
@@ -462,15 +465,21 @@ class FFTViewFeature:
                 "linearMode": self.settings.linear_mode,
                 "updatedAt": datetime.utcnow()
             }
-            settings_collection.update_one(
+            result = settings_collection.update_one(
                 {"projectId": self.project_id},
                 {"$set": setting},
                 upsert=True
             )
+            if result.upserted_id:
+                logging.info(f"Inserted new FFT settings document with ID: {result.upserted_id}")
+            else:
+                logging.info(f"Updated existing FFT settings document")
             if self.console:
                 self.console.append_to_console(f"Saved FFT settings for project ID: {self.project_id}")
         except Exception as e:
-            self.log_and_set_status(f"Error saving FFT settings: {str(e)}")
+            logging.error(f"Error saving FFT settings: {str(e)}")
+            if self.console:
+                self.console.append_to_console(f"Error saving FFT settings: {str(e)}")
 
     def start_saving(self):
         if self.is_saving:
@@ -704,7 +713,6 @@ class FFTViewFeature:
 
     def close(self):
         self.update_timer.stop()
-        self.mongo_client.close()
 
     def cleanup(self):
         self.close()

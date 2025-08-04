@@ -4,6 +4,8 @@ import datetime
 import logging
 import re
 
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+
 class Database:
     def __init__(self, connection_string="mongodb://localhost:27017/", email="user@example.com"):
         self.connection_string = connection_string
@@ -14,6 +16,8 @@ class Database:
         self.projects_collection = None
         self.messages_collection = None
         self.timeview_collection = None
+        self.tabularview_collection = None
+        self.fftsettings_collection = None
         self.projects = []
         self.connect()
 
@@ -25,6 +29,8 @@ class Database:
             self.projects_collection = self.db["projects"]
             self.messages_collection = self.db["mqttmessage"]
             self.timeview_collection = self.db["timeview_messages"]
+            self.tabularview_collection = self.db["TabularViewSettings"]
+            self.fftsettings_collection = self.db["FFTSettings"]
             self._create_timeview_indexes()
             logging.info(f"Database initialized for {self.email}")
         except Exception as e:
@@ -69,6 +75,8 @@ class Database:
                 self.projects_collection = None
                 self.messages_collection = None
                 self.timeview_collection = None
+                self.tabularview_collection = None
+                self.fftsettings_collection = None
                 logging.info("MongoDB connection closed")
             except Exception as e:
                 logging.error(f"Error closing MongoDB connection: {str(e)}")
@@ -95,6 +103,7 @@ class Database:
             logging.error(f"Models must be a list, received: {type(models)}")
             return False, f"Models must be a list, received: {type(models)}"
 
+        valid_units = ["mil", "mm", "um"]
         for model in models:
             if not isinstance(model, dict) or "name" not in model or "channels" not in model:
                 logging.error(f"Each model must be a dictionary with 'name' and 'channels' fields, received: {model}")
@@ -118,6 +127,10 @@ class Database:
                 for field, default in required_channel_fields.items():
                     if field not in channel or channel[field] is None:
                         channel[field] = default
+                # Validate unit
+                if channel["unit"].lower().strip() not in valid_units:
+                    logging.error(f"Invalid unit '{channel['unit']}' for channel {channel['channelName']}. Must be one of {valid_units}")
+                    return False, f"Invalid unit '{channel['unit']}' for channel {channel['channelName']}. Must be one of {valid_units}"
                 self._calculate_channel_properties(channel)
 
         project_data = {
@@ -131,29 +144,89 @@ class Database:
 
         try:
             result = self.projects_collection.insert_one(project_data)
-            logging.info(f"Inserted project {project_name} with ID: {result.inserted_id}")
+            project_id = result.inserted_id
+            logging.info(f"Inserted project {project_name} with ID: {project_id}")
+
+            # Determine the unit for TabularViewSettings (use the first channel's unit)
+            unit = "mil"  # Default unit
+            if models and models[0].get("channels"):
+                unit = models[0]["channels"][0].get("unit", "mil").lower().strip()
+                if unit not in valid_units:
+                    logging.warning(f"Invalid unit '{unit}' in first channel, defaulting to 'mil'")
+                    unit = "mil"
+                logging.debug(f"Selected unit '{unit}' for TabularViewSettings from first channel")
+
+            # Initialize TabularViewSettings
+            tabular_settings = {
+                "projectId": project_id,
+                "project_name": project_name,
+                "email": self.email,
+                "unit": unit,
+                "bandpassSelection": "None",
+                "channelNameVisible": True,
+                "unitVisible": True,
+                "datetimeVisible": True,
+                "rpmVisible": True,
+                "gapVisible": True,
+                "directVisible": True,
+                "bandpassVisible": True,
+                "one_xa_visible": True,
+                "one_xp_visible": True,
+                "two_xa_visible": True,
+                "two_xp_visible": True,
+                "nx_amp_visible": True,
+                "nx_phase_visible": True,
+                "updated_at": datetime.datetime.utcnow()
+            }
+            self.tabularview_collection.insert_one(tabular_settings)
+            logging.info(f"Initialized TabularViewSettings for project ID: {project_id} with unit: {unit}")
+
+            # Initialize FFTSettings
+            fft_settings = {
+                "projectId": project_id,
+                "project_name": project_name,
+                "email": self.email,
+                "windowType": "Hamming",
+                "startFrequency": 10.0,
+                "stopFrequency": 2000.0,
+                "numberOfLines": 1600,
+                "overlapPercentage": 0.0,
+                "averagingMode": "No Averaging",
+                "numberOfAverages": 10,
+                "weightingMode": "Linear",
+                "linearMode": "Continuous",
+                "updatedAt": datetime.datetime.utcnow()
+            }
+            self.fftsettings_collection.insert_one(fft_settings)
+            logging.info(f"Initialized FFTSettings for project ID: {project_id}")
+
             if project_name not in self.projects:
                 self.projects.append(project_name)
             logging.info(f"Project {project_name} created with {len(models)} models")
             return True, f"Project '{project_name}' created successfully!"
         except Exception as e:
-            logging.error(f"Failed to create project: {str(e)}")
+            logging.error(f"Failed to create project or settings: {str(e)}")
             return False, f"Failed to create project: {str(e)}"
 
     def _calculate_channel_properties(self, channel):
         """Auto-calculate fields based on user changes (e.g., unit conversion)."""
+        valid_units = ["mil", "mm", "um"]
         unit = channel.get("unit", "mil")
         if unit is None:
             unit = "mil"  # Default to 'mil' if unit is None
         unit = unit.lower().strip() if isinstance(unit, str) else "mil"
+        if unit not in valid_units:
+            logging.warning(f"Invalid unit '{unit}' for channel {channel['channelName']}, defaulting to 'mil'")
+            unit = "mil"
+            channel["unit"] = unit
         sensitivity = float(channel.get("sensitivity", "1.0") or "1.0")  # Handle None or empty string
         if unit == "mm":
             channel["ConvertedSensitivity"] = sensitivity / 25.4  # mil to mm
         elif unit == "um":
             channel["ConvertedSensitivity"] = sensitivity * 1000  # mil to um
         else:
-            channel["ConvertedSensitivity"] = sensitivity
-        logging.debug(f"Calculated ConvertedSensitivity for {channel['channelName']}: {channel['ConvertedSensitivity']}")
+            channel["ConvertedSensitivity"] = sensitivity  # mil
+        logging.debug(f"Calculated ConvertedSensitivity for {channel['channelName']}: {channel['ConvertedSensitivity']} (unit: {unit})")
 
     def edit_project(self, old_project_name, new_project_name, updated_models=None, channel_count=None):
         if not old_project_name or not new_project_name:
@@ -163,6 +236,7 @@ class Database:
         if new_project_name != old_project_name and self.projects_collection.find_one({"project_name": new_project_name, "email": self.email}):
             return False, f"Project '{new_project_name}' already exists!"
 
+        valid_units = ["mil", "mm", "um"]
         update_data = {"project_name": new_project_name}
         if channel_count is not None:
             update_data["channel_count"] = channel_count
@@ -192,11 +266,15 @@ class Database:
                     for field, default in required_channel_fields.items():
                         if field not in channel or channel[field] is None:
                             channel[field] = default
+                    if channel["unit"].lower().strip() not in valid_units:
+                        logging.error(f"Invalid unit '{channel['unit']}' for channel {channel['channelName']}. Must be one of {valid_units}")
+                        return False, f"Invalid unit '{channel['unit']}' for channel {channel['channelName']}. Must be one of {valid_units}"
                     self._calculate_channel_properties(channel)
             update_data["models"] = updated_models
             logging.debug(f"Updating project with new models: {len(updated_models)} models")
 
         try:
+            # Update project data
             result = self.projects_collection.update_one(
                 {"project_name": old_project_name, "email": self.email},
                 {"$set": update_data}
@@ -204,6 +282,25 @@ class Database:
             logging.info(f"Updated project: matched {result.matched_count}, modified {result.modified_count}")
             if result.matched_count == 0:
                 return False, f"No project found with name '{old_project_name}'"
+
+            # Update TabularViewSettings with new unit if models are updated
+            if updated_models and updated_models[0].get("channels"):
+                unit = updated_models[0]["channels"][0].get("unit", "mil").lower().strip()
+                if unit not in valid_units:
+                    logging.warning(f"Invalid unit '{unit}' in first channel, defaulting to 'mil'")
+                    unit = "mil"
+                logging.debug(f"Updating TabularViewSettings with unit: {unit}")
+                self.tabularview_collection.update_one(
+                    {"project_name": old_project_name, "email": self.email},
+                    {"$set": {
+                        "project_name": new_project_name,
+                        "unit": unit,
+                        "updated_at": datetime.datetime.utcnow()
+                    }}
+                )
+                logging.info(f"Updated TabularViewSettings for project: {new_project_name} with unit: {unit}")
+
+            # Update other collections for project name change
             if old_project_name != new_project_name:
                 self.messages_collection.update_many(
                     {"project_name": old_project_name, "email": self.email},
@@ -212,6 +309,10 @@ class Database:
                 self.timeview_collection.update_many(
                     {"project_name": old_project_name, "email": self.email},
                     {"$set": {"project_name": new_project_name}}
+                )
+                self.fftsettings_collection.update_many(
+                    {"project_name": old_project_name, "email": self.email},
+                    {"$set": {"project_name": new_project_name, "updatedAt": datetime.datetime.utcnow()}}
                 )
                 if old_project_name in self.projects:
                     self.projects[self.projects.index(old_project_name)] = new_project_name
@@ -232,6 +333,13 @@ class Database:
         if not channel:
             return False, f"Channel '{channel_name}' not found in model!"
 
+        valid_units = ["mil", "mm", "um"]
+        if "unit" in updated_properties:
+            unit = updated_properties["unit"].lower().strip()
+            if unit not in valid_units:
+                logging.error(f"Invalid unit '{unit}' for channel {channel_name}. Must be one of {valid_units}")
+                return False, f"Invalid unit '{unit}' for channel {channel_name}. Must be one of {valid_units}"
+
         channel.update(updated_properties)
         self._calculate_channel_properties(channel)
 
@@ -240,6 +348,19 @@ class Database:
                 {"project_name": project_name, "email": self.email, "models.name": model_name},
                 {"$set": {"models.$.channels": model["channels"]}}
             )
+            # Update TabularViewSettings unit if changed
+            if "unit" in updated_properties:
+                unit = updated_properties.get("unit", "mil").lower().strip()
+                logging.debug(f"Updating TabularViewSettings with new unit: {unit} for project: {project_name}")
+                self.tabularview_collection.update_one(
+                    {"project_name": project_name, "email": self.email},
+                    {"$set": {
+                        "project_name": project_name,
+                        "unit": unit,
+                        "updated_at": datetime.datetime.utcnow()
+                    }}
+                )
+                logging.info(f"Updated TabularViewSettings unit to {unit} for project: {project_name}")
             logging.info(f"Updated channel {channel_name} in {project_name}/{model_name}: matched {result.matched_count}, modified {result.modified_count}")
             return True, f"Channel '{channel_name}' updated successfully!"
         except Exception as e:
@@ -252,6 +373,8 @@ class Database:
             logging.info(f"Deleted project {project_name}: {result.deleted_count} documents")
             self.messages_collection.delete_many({"project_name": project_name, "email": self.email})
             self.timeview_collection.delete_many({"project_name": project_name, "email": self.email})
+            self.tabularview_collection.delete_many({"project_name": project_name, "email": self.email})
+            self.fftsettings_collection.delete_many({"project_name": project_name, "email": self.email})
             if project_name in self.projects:
                 self.projects.remove(project_name)
             logging.info(f"Project '{project_name}' deleted")
@@ -355,6 +478,14 @@ class Database:
                 {"project_name": project_name, "model_name": model_name, "topic": current_tag_name, "email": self.email},
                 {"$set": {"topic": new_tag_name}}
             )
+            self.tabularview_collection.update_many(
+                {"project_name": project_name, "model_name": model_name, "topic": current_tag_name, "email": self.email},
+                {"$set": {"topic": new_tag_name}}
+            )
+            self.fftsettings_collection.update_many(
+                {"project_name": project_name, "model_name": model_name, "topic": current_tag_name, "email": self.email},
+                {"$set": {"topic": new_tag_name}}
+            )
             logging.info(f"Tag {current_tag_name} updated to {new_tag_name} in {project_name}/{model_name}")
             return True, "Tag updated successfully!"
         except Exception as e:
@@ -380,6 +511,12 @@ class Database:
                 {"project_name": project_name, "model_name": model_name, "tag_name": tag_name, "email": self.email}
             )
             self.timeview_collection.delete_many(
+                {"project_name": project_name, "model_name": model_name, "topic": tag_name, "email": self.email}
+            )
+            self.tabularview_collection.delete_many(
+                {"project_name": project_name, "model_name": model_name, "topic": tag_name, "email": self.email}
+            )
+            self.fftsettings_collection.delete_many(
                 {"project_name": project_name, "model_name": model_name, "topic": tag_name, "email": self.email}
             )
             logging.info(f"Tag {tag_name} deleted from {project_name}/{model_name}")

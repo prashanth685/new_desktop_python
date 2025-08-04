@@ -4,7 +4,6 @@ from PyQt5.QtCore import Qt, QThread, QObject, pyqtSignal, QTimer
 from PyQt5.QtGui import QIcon
 import pyqtgraph as pg
 from datetime import datetime
-from pymongo import MongoClient
 import scipy.signal as signal
 import logging
 
@@ -40,11 +39,10 @@ class TabularViewWorker(QObject):
         self.project_name = project_name
         self.model_name = model_name
         self.db = db
-        self.mongo_client = MongoClient("mongodb://localhost:27017")
 
     def run(self):
         try:
-            database = self.mongo_client.get_database("changed_db")
+            database = self.db.client.get_database("changed_db")
             projects_collection = database.get_collection("projects")
             project = projects_collection.find_one({"project_name": self.project_name, "email": self.db.email})
             if not project:
@@ -66,11 +64,12 @@ class TabularViewWorker(QObject):
             channel_properties = {}
             for channel in model["channels"]:
                 channel_name = channel.get("channelName", "Unknown")
-                correction_value = float(channel.get("CorrectionValue", "1.0")) if channel.get("CorrectionValue") else 1.0
-                gain = float(channel.get("Gain", "1.0")) if channel.get("Gain") else 1.0
-                sensitivity = float(channel.get("Sensitivity", "1.0")) if channel.get("Sensitivity") and float(channel.get("Sensitivity")) != 0 else 1.0
+                correction_value = float(channel.get("correctionValue", "1.0")) if channel.get("correctionValue") else 1.0
+                gain = float(channel.get("gain", "1.0")) if channel.get("gain") else 1.0
+                sensitivity = float(channel.get("sensitivity", "1.0")) if channel.get("sensitivity") and float(channel.get("sensitivity")) != 0 else 1.0
+                unit = channel.get("unit", "mil").lower().strip()
                 channel_properties[channel_name] = {
-                    "Unit": channel.get("Unit", "mil").lower(),
+                    "Unit": unit,
                     "CorrectionValue": correction_value,
                     "Gain": gain,
                     "Sensitivity": sensitivity
@@ -82,7 +81,6 @@ class TabularViewWorker(QObject):
             self.error.emit(f"Error initializing TabularView: {str(ex)}")
             self.initialized.emit(["Channel 1"], 1, "", {}, None)
         finally:
-            self.mongo_client.close()
             self.finished.emit()
 
 class TabularViewFeature:
@@ -99,7 +97,7 @@ class TabularViewFeature:
         self.channel_names = ["Channel 1"]
         self.channel_properties = {}
         self.project_id = None
-        self.selected_channel = 0
+        self.selected_channel = 0  # Fixed to Channel 1
         self.raw_data = [np.zeros(4096)]
         self.low_pass_data = [np.zeros(4096)]
         self.high_pass_data = [np.zeros(4096)]
@@ -129,7 +127,7 @@ class TabularViewFeature:
         self.tag_name = ""
         self.scroll_content = None
         self.scroll_layout = None
-        self.mongo_client = MongoClient("mongodb://localhost:27017")
+        self.mongo_client = self.db.client
         self.timer = QTimer()
         self.timer.timeout.connect(self.update_display)
         self.timer.start(1000)
@@ -144,13 +142,7 @@ class TabularViewFeature:
         layout = QVBoxLayout()
         self.widget.setLayout(layout)
 
-        # Top layout with channel selector and settings button
         top_layout = QHBoxLayout()
-        channel_label = QLabel("Select Channel for Plots:")
-        top_layout.addWidget(channel_label)
-        self.channel_selector = QComboBox()
-        self.channel_selector.currentIndexChanged.connect(self.on_channel_selected)
-        top_layout.addWidget(self.channel_selector)
         top_layout.addStretch()
         self.settings_button = QPushButton("⚙️ Settings")
         self.settings_button.setStyleSheet("""
@@ -297,9 +289,6 @@ class TabularViewFeature:
             self.tag_name = tag_name
             self.channel_properties = channel_properties
             self.project_id = project_id
-            self.channel_selector.clear()
-            self.channel_selector.addItems(self.channel_names)
-            self.channel_selector.setCurrentIndex(self.selected_channel)
             self.table.setRowCount(self.num_channels)
             self.initialize_data_arrays()
             self.update_table_defaults()
@@ -311,8 +300,6 @@ class TabularViewFeature:
             self.log_and_set_status(f"Error completing initialization: {str(ex)}")
             self.channel_names = ["Channel 1"]
             self.num_channels = 1
-            self.channel_selector.clear()
-            self.channel_selector.addItem("Channel 1")
             self.table.setRowCount(1)
             self.initialize_data_arrays()
             self.update_table_defaults()
@@ -333,7 +320,8 @@ class TabularViewFeature:
             plot_widget = pg.PlotWidget(title=title)
             plot_widget.showGrid(x=True, y=True)
             plot_widget.setLabel('bottom', 'Time (s)' if title != "Bandpass Peak-to-Peak Over Time" else 'Time (s)')
-            plot_widget.setLabel('left', 'Amplitude' if title != "Bandpass Peak-to-Peak Over Time" else 'Peak-to-Peak Value')
+            unit_label = self.get_unit_label()
+            plot_widget.setLabel('left', f'Amplitude ({unit_label})' if title != "Bandpass Peak-to-Peak Over Time" else f'Peak-to-Peak Value ({unit_label})')
             plot_widget.setFixedHeight(250)
             self.scroll_layout.addWidget(plot_widget)
             self.plot_widgets.append(plot_widget)
@@ -343,8 +331,11 @@ class TabularViewFeature:
         self.plot_initialized = True
         self.update_plots()
 
-    def get_widget(self):
-        return self.widget
+    def get_unit_label(self):
+        """Get the unit label for the selected channel (Channel 1)."""
+        channel_name = self.channel_names[self.selected_channel] if self.selected_channel < len(self.channel_names) else "Channel 1"
+        unit = self.channel_properties.get(channel_name, {"Unit": "mil"})["Unit"].lower()
+        return unit
 
     def initialize_data_arrays(self):
         self.raw_data = [np.zeros(4096) for _ in range(self.num_channels)]
@@ -373,7 +364,8 @@ class TabularViewFeature:
         self.table.setRowCount(self.num_channels)
         for row in range(self.num_channels):
             channel_name = self.channel_names[row] if row < len(self.channel_names) else f"Channel {row+1}"
-            unit = self.channel_properties.get(channel_name, {"Unit": "mil"})["Unit"]
+            unit = self.channel_properties.get(channel_name, {"Unit": "mil"})["Unit"].lower()
+            logging.debug(f"Setting unit for channel {channel_name}: {unit}")
             default_data = {
                 "Channel Name": channel_name,
                 "Unit": unit,
@@ -387,8 +379,9 @@ class TabularViewFeature:
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
         self.table.setFixedHeight(200)
+        self.update_column_visibility()
         if self.console:
-            self.console.append_to_console(f"Updated table defaults for {self.num_channels} channels: {self.channel_names}")
+            self.console.append_to_console(f"Updated table defaults with units for {self.num_channels} channels: {self.channel_names}")
 
     def load_settings_from_database(self):
         try:
@@ -416,7 +409,7 @@ class TabularViewFeature:
                 for header, cb in self.checkbox_dict.items():
                     cb.setChecked(self.column_visibility[header])
                 if self.console:
-                    self.console.append_to_console(f"Loaded TabularView settings for project ID: {self.project_id}")
+                    self.console.append_to_console(f"Loaded TabularView settings for project ID: {self.project_id}, unit visibility: {self.column_visibility['Unit']}")
             else:
                 if self.console:
                     self.console.append_to_console(f"No TabularView settings found for project ID: {self.project_id}. Using defaults.")
@@ -425,11 +418,18 @@ class TabularViewFeature:
             self.log_and_set_status(f"Error loading TabularView settings: {str(ex)}")
 
     def save_settings_to_database(self):
+        if not self.project_id:
+            logging.error("Project ID is not set, cannot save settings")
+            if self.console:
+                self.console.append_to_console("Error: Project ID is not set, cannot save settings")
+            return
         try:
             database = self.mongo_client.get_database("changed_db")
             settings_collection = database.get_collection("TabularViewSettings")
             setting = {
                 "projectId": self.project_id,
+                "project_name": self.project_name,
+                "email": self.db.email,
                 "bandpassSelection": self.bandpass_selection,
                 "channelNameVisible": self.column_visibility["Channel Name"],
                 "unitVisible": self.column_visibility["Unit"],
@@ -446,15 +446,21 @@ class TabularViewFeature:
                 "nx_phase_visible": self.column_visibility["NXPhase"],
                 "updated_at": datetime.utcnow()
             }
-            settings_collection.update_one(
+            result = settings_collection.update_one(
                 {"projectId": self.project_id},
                 {"$set": setting},
                 upsert=True
             )
+            if result.upserted_id:
+                logging.info(f"Inserted new TabularView settings document with ID: {result.upserted_id}")
+            else:
+                logging.info(f"Updated existing TabularView settings document")
             if self.console:
                 self.console.append_to_console(f"Saved TabularView settings for project ID: {self.project_id}")
         except Exception as ex:
-            self.log_and_set_status(f"Error saving TabularView settings: {str(ex)}")
+            logging.error(f"Error saving TabularView settings: {str(ex)}")
+            if self.console:
+                self.console.append_to_console(f"Error saving TabularView settings: {str(ex)}")
 
     def toggle_settings(self):
         self.settings_panel.setVisible(not self.settings_panel.isVisible())
@@ -484,6 +490,7 @@ class TabularViewFeature:
         headers = ["Channel Name", "Unit", "DateTime", "RPM", "Gap", "Direct", "Bandpass", "1xA", "1xP", "2xA", "2xP", "NXAmp", "NXPhase"]
         for col, header in enumerate(headers):
             self.table.setColumnHidden(col, not self.column_visibility[header])
+        logging.debug(f"Updated column visibility: {self.column_visibility}")
 
     def compute_harmonics(self, data, start_idx, length, harmonic):
         if length <= 0 or start_idx + length > len(data):
@@ -504,37 +511,34 @@ class TabularViewFeature:
         channel_name = self.channel_names[channel_idx] if channel_idx < len(self.channel_names) else f"Channel {channel_idx+1}"
         props = self.channel_properties.get(channel_name, {"Unit": "mil", "CorrectionValue": 1.0, "Gain": 1.0, "Sensitivity": 1.0})
         channel_data = np.array(data, dtype=float) * (3.3 / 65535.0) * (props["CorrectionValue"] * props["Gain"]) / props["Sensitivity"]
-        if props["Unit"].lower() == "mil":
-            channel_data /= 25.4
-        elif props["Unit"].lower() == "mm":
-            channel_data /= 1000.0
+        unit = props["Unit"].lower()
+        if unit == "mm":
+            channel_data /= 25.4  # Convert from mil to mm
+        elif unit == "um":
+            channel_data *= 25.4 * 1000  # Convert from mil to um
+        logging.debug(f"Processed data for {channel_name} with unit {unit}, shape: {channel_data.shape}")
         return channel_data
 
     def format_direct_value(self, values, unit):
         if not values or len(values) == 0:
-            return "0.0"
+            return "0.00"
         avg = np.mean(values)
-        if unit.lower() == "mil":
-            return f"{avg:.1f}"
-        elif unit.lower() == "um":
-            return f"{int(avg)}"
-        elif unit.lower() == "mm":
-            return f"{avg:.3f}"
-        return f"{avg:.1f}"
-
-    def on_channel_selected(self, index):
-        if self.table and self.table_initialized:
-            self.selected_channel = index
-            self.update_plots()
-            if self.console:
-                self.console.append_to_console(f"Switched to channel for plots: {self.channel_names[self.selected_channel]}")
+        unit = unit.lower()
+        if unit == "mil":
+            return f"{avg:.2f}"
+        elif unit == "um":
+            return f"{avg * 25.4 * 1000:.0f}"  # Convert mil to um
+        elif unit == "mm":
+            return f"{avg / 25.4:.3f}"  # Convert mil to mm
+        logging.debug(f"Formatted direct value: {avg} in unit {unit}")
+        return f"{avg:.2f}"
 
     def on_data_received(self, tag_name, model_name, values, sample_rate, frame_index):
         if not values or len(values) < 1:
             self.log_and_set_status(f"Insufficient data received for frame {frame_index}: {len(values)} channels")
             return
         try:
-            # Ensure values match the number of channels
+            self.refresh_channel_properties()
             values = values[:self.num_channels] + [np.zeros(4096).tolist() for _ in range(self.num_channels - len(values))] if len(values) < self.num_channels else values[:self.num_channels]
             for i in range(len(values)):
                 if len(values[i]) < 4096:
@@ -546,31 +550,28 @@ class TabularViewFeature:
             if self.console:
                 self.console.append_to_console(f"Received data for frame {frame_index}, {len(values)} channels, updated channels: {self.channel_names}")
 
-            # Process all channels
             channel_data_list = []
             for ch in range(self.num_channels):
                 channel_name = self.channel_names[ch] if ch < len(self.channel_names) else f"Channel {ch+1}"
                 props = self.channel_properties.get(channel_name, {"Unit": "mil"})
-                unit = props["Unit"]
+                unit = props["Unit"].lower()
                 self.raw_data[ch] = self.process_calibrated_data(values[ch], ch)
                 nyquist = self.sample_rate / 2.0
                 tap_num = 31
-                # Adjust bandpass frequencies based on selection
                 if self.bandpass_selection == "50-200 Hz":
                     band = [50 / nyquist, 200 / nyquist]
                 elif self.bandpass_selection == "100-300 Hz":
                     band = [100 / nyquist, 300 / nyquist]
                 else:
-                    band = [50 / nyquist, 200 / nyquist]  # Default
+                    band = [50 / nyquist, 200 / nyquist]
                 low_pass_coeffs = signal.firwin(tap_num, 20 / nyquist, window='hamming')
                 high_pass_coeffs = signal.firwin(tap_num, 200 / nyquist, window='hamming', pass_zero=False)
                 band_pass_coeffs = signal.firwin(tap_num, band, window='hamming', pass_zero=False)
                 self.low_pass_data[ch] = signal.lfilter(low_pass_coeffs, 1.0, self.raw_data[ch])
                 self.high_pass_data[ch] = signal.lfilter(high_pass_coeffs, 1.0, self.raw_data[ch])
                 self.band_pass_data[ch] = signal.lfilter(band_pass_coeffs, 1.0, self.raw_data[ch])
-                # Compute frequency from tacho data if available
                 tacho_freq = 0.0
-                if len(values) > self.num_channels:  # Assuming tacho data is after main channels
+                if len(values) > self.num_channels:
                     tacho_data = values[self.num_channels]
                     if len(tacho_data) > 1:
                         peaks, _ = signal.find_peaks(tacho_data)
@@ -611,7 +612,6 @@ class TabularViewFeature:
                 self.band_pass_peak_to_peak[ch] = np.mean(band_pass_peak_to_peak_values) if band_pass_peak_to_peak_values else 0.0
                 self.band_pass_peak_to_peak_history[ch].append(self.band_pass_peak_to_peak[ch])
                 self.band_pass_peak_to_peak_times[ch].append((datetime.now() - self.start_time).total_seconds())
-                # Keep history to a reasonable length
                 if len(self.band_pass_peak_to_peak_history[ch]) > 100:
                     self.band_pass_peak_to_peak_history[ch] = self.band_pass_peak_to_peak_history[ch][-100:]
                     self.band_pass_peak_to_peak_times[ch] = self.band_pass_peak_to_peak_times[ch][-100:]
@@ -630,17 +630,18 @@ class TabularViewFeature:
                     "RPM": f"{self.average_frequency[ch] * 60.0:.2f}",
                     "Gap": f"{gap_value:.2f}",
                     "Direct": direct_formatted,
-                    "Bandpass": f"{self.band_pass_peak_to_peak[ch]:.2f}",
-                    "1xA": f"{np.mean(self.one_x_amps[ch]):.2f}" if self.one_x_amps[ch] else "0.00",
+                    "Bandpass": self.format_direct_value([self.band_pass_peak_to_peak[ch]], unit),
+                    "1xA": self.format_direct_value([np.mean(self.one_x_amps[ch])], unit) if self.one_x_amps[ch] else "0.00",
                     "1xP": f"{np.mean(self.one_x_phases[ch]):.2f}" if self.one_x_phases[ch] else "0.00",
-                    "2xA": f"{np.mean(self.two_x_amps[ch]):.2f}" if self.two_x_amps[ch] else "0.00",
+                    "2xA": self.format_direct_value([np.mean(self.two_x_amps[ch])], unit) if self.two_x_amps[ch] else "0.00",
                     "2xP": f"{np.mean(self.two_x_phases[ch]):.2f}" if self.two_x_phases[ch] else "0.00",
-                    "NXAmp": f"{np.mean(self.three_x_amps[ch]):.2f}" if self.three_x_amps[ch] else "0.00",
+                    "NXAmp": self.format_direct_value([np.mean(self.three_x_amps[ch])], unit) if self.three_x_amps[ch] else "0.00",
                     "NXPhase": f"{np.mean(self.three_x_phases[ch]):.2f}" if self.three_x_phases[ch] else "0.00"
                 }
                 channel_data_list.append(channel_data)
                 self.update_table_row(ch, channel_data)
-            self.update_plots()
+            # Defer plot update to avoid UI blocking
+            QTimer.singleShot(0, self.update_plots)
             if self.console:
                 self.console.append_to_console(f"Updated table with data for frame {frame_index}, {self.num_channels} channels")
         except Exception as ex:
@@ -656,6 +657,7 @@ class TabularViewFeature:
                 item = QTableWidgetItem(channel_data[header])
                 item.setTextAlignment(Qt.AlignCenter)
                 self.table.setItem(row, col, item)
+            logging.debug(f"Updated table row {row} with unit: {channel_data['Unit']}")
         except Exception as ex:
             self.log_and_set_status(f"Error updating table row {row}: {str(ex)}")
 
@@ -665,10 +667,11 @@ class TabularViewFeature:
             self.initialize_plots()
             return
         try:
+            self.refresh_channel_properties()
             for ch in range(self.num_channels):
                 channel_name = self.channel_names[ch] if ch < len(self.channel_names) else f"Channel {ch+1}"
                 props = self.channel_properties.get(channel_name, {"Unit": "mil"})
-                unit = props["Unit"]
+                unit = props["Unit"].lower()
                 direct_values = [np.ptp(self.raw_data[ch])] if np.any(self.raw_data[ch]) else []
                 channel_data = {
                     "Channel Name": channel_name,
@@ -677,16 +680,16 @@ class TabularViewFeature:
                     "RPM": f"{self.average_frequency[ch] * 60.0:.2f}" if self.average_frequency[ch] > 0 else "0.00",
                     "Gap": "0.00",
                     "Direct": self.format_direct_value(direct_values, unit),
-                    "Bandpass": f"{self.band_pass_peak_to_peak[ch]:.2f}",
-                    "1xA": f"{np.mean(self.one_x_amps[ch]):.2f}" if self.one_x_amps[ch] else "0.00",
+                    "Bandpass": self.format_direct_value([self.band_pass_peak_to_peak[ch]], unit),
+                    "1xA": self.format_direct_value([np.mean(self.one_x_amps[ch])], unit) if self.one_x_amps[ch] else "0.00",
                     "1xP": f"{np.mean(self.one_x_phases[ch]):.2f}" if self.one_x_phases[ch] else "0.00",
-                    "2xA": f"{np.mean(self.two_x_amps[ch]):.2f}" if self.two_x_amps[ch] else "0.00",
+                    "2xA": self.format_direct_value([np.mean(self.two_x_amps[ch])], unit) if self.two_x_amps[ch] else "0.00",
                     "2xP": f"{np.mean(self.two_x_phases[ch]):.2f}" if self.two_x_phases[ch] else "0.00",
-                    "NXAmp": f"{np.mean(self.three_x_amps[ch]):.2f}" if self.three_x_amps[ch] else "0.00",
+                    "NXAmp": self.format_direct_value([np.mean(self.three_x_amps[ch])], unit) if self.three_x_amps[ch] else "0.00",
                     "NXPhase": f"{np.mean(self.three_x_phases[ch]):.2f}" if self.three_x_phases[ch] else "0.00"
                 }
                 self.update_table_row(ch, channel_data)
-            self.update_plots()
+            QTimer.singleShot(0, self.update_plots)
             if self.console:
                 self.console.append_to_console(f"Updated display for all {self.num_channels} channels")
         except Exception as ex:
@@ -696,7 +699,7 @@ class TabularViewFeature:
         if not self.plot_initialized or not self.plot_widgets or not self.plots:
             self.initialize_plots()
             return
-        ch = self.selected_channel
+        ch = self.selected_channel  # Fixed to Channel 1
         if ch >= self.num_channels:
             self.log_and_set_status("Selected channel not available, skipping plot update")
             return
@@ -707,6 +710,8 @@ class TabularViewFeature:
         raw_trim = trim_samples
         if len(self.raw_data[ch]) <= trim_samples:
             raw_trim = low_pass_trim = high_pass_trim = band_pass_trim = 0
+        channel_name = self.channel_names[ch] if ch < len(self.channel_names) else f"Channel {ch+1}"
+        unit = self.channel_properties.get(channel_name, {"Unit": "mil"})["Unit"].lower()
         data_sets = [
             (self.raw_data[ch], raw_trim, "Raw Data"),
             (self.low_pass_data[ch], low_pass_trim, "Low-Pass Filtered Data (20 Hz)"),
@@ -723,7 +728,7 @@ class TabularViewFeature:
                     time_data = self.time_points[:len(data)]
                 if i < len(self.plots):
                     self.plots[i].setData(time_data, data)
-                    self.plot_widgets[i].setTitle(f"{title} (Channel: {self.channel_names[ch]}, Freq: {self.average_frequency[ch]:.2f} Hz)")
+                    self.plot_widgets[i].setTitle(f"{title} (Channel: {self.channel_names[ch]}, Freq: {self.average_frequency[ch]:.2f} Hz, Unit: {unit})")
                     y_min = np.min(data) * 1.1 if data.size > 0 else -1.0
                     y_max = np.max(data) * 1.1 if data.size > 0 else 1.0
                     self.plot_widgets[i].setYRange(y_min, y_max, padding=0.1)
@@ -731,12 +736,18 @@ class TabularViewFeature:
                 self.log_and_set_status(f"Error updating plot {i}: {str(ex)}")
         try:
             if self.band_pass_peak_to_peak_times[ch] and self.band_pass_peak_to_peak_history[ch]:
-                self.plots[4].setData(self.band_pass_peak_to_peak_times[ch], self.band_pass_peak_to_peak_history[ch])
-                y_max = max(0.01, max(self.band_pass_peak_to_peak_history[ch]) * 1.1)
+                peak_data = np.array(self.band_pass_peak_to_peak_history[ch])
+                if unit == "mm":
+                    peak_data /= 25.4  # Convert to mm
+                elif unit == "um":
+                    peak_data *= 25.4 * 1000  # Convert to um
+                self.plots[4].setData(self.band_pass_peak_to_peak_times[ch], peak_data)
+                y_max = max(0.01, np.max(peak_data) * 1.1) if peak_data.size > 0 else 0.01
                 self.plot_widgets[4].setYRange(0, y_max, padding=0.1)
             else:
                 self.plots[4].setData(np.array([0]), np.array([0]))
                 self.plot_widgets[4].setYRange(0, 0.01, padding=0.1)
+            self.plot_widgets[4].setTitle(f"Bandpass Peak-to-Peak Over Time (Channel: {self.channel_names[ch]}, Unit: {unit})")
         except Exception as ex:
             self.log_and_set_status(f"Error updating peak-to-peak plot: {str(ex)}")
 
@@ -755,21 +766,20 @@ class TabularViewFeature:
             self.channel_properties = {}
             for channel in model["channels"]:
                 channel_name = channel.get("channelName", "Unknown")
+                unit = channel.get("unit", "mil").lower().strip()
                 self.channel_properties[channel_name] = {
-                    "Unit": channel.get("Unit", "mil").lower(),
-                    "CorrectionValue": float(channel.get("CorrectionValue", "1.0")) if channel.get("CorrectionValue") else 1.0,
-                    "Gain": float(channel.get("Gain", "1.0")) if channel.get("Gain") else 1.0,
-                    "Sensitivity": float(channel.get("Sensitivity", "1.0")) if channel.get("Sensitivity") else 1.0
+                    "Unit": unit,
+                    "CorrectionValue": float(channel.get("correctionValue", "1.0")) if channel.get("correctionValue") else 1.0,
+                    "Gain": float(channel.get("gain", "1.0")) if channel.get("gain") else 1.0,
+                    "Sensitivity": float(channel.get("sensitivity", "1.0")) if channel.get("sensitivity") else 1.0
                 }
-            self.channel_selector.clear()
-            self.channel_selector.addItems(self.channel_names)
-            self.channel_selector.setCurrentIndex(self.selected_channel)
             self.table.setRowCount(self.num_channels)
             self.initialize_data_arrays()
             self.update_table_defaults()
-            self.update_plots()
+            self.load_settings_from_database()
+            self.initialize_plots()
             if self.console:
-                self.console.append_to_console(f"Refreshed channel properties: {self.num_channels} channels, Names: {self.channel_names}")
+                self.console.append_to_console(f"Refreshed channel properties: {self.num_channels} channels, Names: {self.channel_names}, Units: {[self.channel_properties[name]['Unit'] for name in self.channel_names]}")
         except Exception as ex:
             self.log_and_set_status(f"Error refreshing channel properties: {str(ex)}")
 
@@ -792,4 +802,12 @@ class TabularViewFeature:
             self.table.deleteLater()
             self.table = None
             self.table_initialized = False
-        self.mongo_client.close()
+        if self.widget:
+            self.widget.deleteLater()
+            self.widget = None
+
+    def get_widget(self):
+        if not self.widget:
+            self.log_and_set_status("Widget not initialized, recreating UI")
+            self.initUI()
+        return self.widget
